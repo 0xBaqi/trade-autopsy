@@ -243,7 +243,7 @@ export default function TradeAutopsy() {
               Detect chain
             </button>
           </div>
-          <div className="intake-hint">Case No. {caseNum ?? "----"} · Checks 7 chains, you confirm the match</div>
+          <div className="intake-hint">Case No. {caseNum ?? "----"} · Checks 21 chains, you confirm the match</div>
         </div>
 
         {status === "error" && (
