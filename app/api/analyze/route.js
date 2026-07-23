@@ -1,7 +1,41 @@
 import { NextResponse } from "next/server";
 import { CHAINS, rpcCall, hexToDecString, isValidTxHash, TRANSFER_TOPIC } from "../../../lib/chains";
+import { extractPayment, verifyPayment, paymentRequiredResponse, buildPaymentRequired } from "../../../lib/x402";
+
+// Handle CORS preflight
+export async function OPTIONS() {
+  return new Response(null, {
+    status: 200,
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, X-PAYMENT, x-payment",
+    },
+  });
+}
 
 export async function POST(req) {
+  const resourceUrl = `${process.env.NEXT_PUBLIC_BASE_URL || "https://trade-autopsy-addr.vercel.app"}/api/analyze`;
+  const description = "Trade Autopsy: plain-English post-mortem for any EVM transaction hash";
+
+  // x402 payment check
+  // If no payment header, return 402 challenge
+  const paymentHeader = extractPayment(req);
+  if (!paymentHeader) {
+    return paymentRequiredResponse(resourceUrl, description);
+  }
+
+  // Verify payment with OKX facilitator (skipped if no OKX API keys = free mode)
+  const requirements = buildPaymentRequired(resourceUrl, description);
+  const verification = await verifyPayment(paymentHeader, requirements);
+  if (!verification.valid && !verification.skipped) {
+    return NextResponse.json(
+      { error: "Payment verification failed", details: verification.error },
+      { status: 402 }
+    );
+  }
+
+  // Payment verified (or in free/test mode) — proceed with analysis
   let body;
   try {
     body = await req.json();
@@ -134,5 +168,13 @@ Do not use markdown formatting, headers, or bullet points. Keep each section to 
     // Keep the fallback analysis above; the raw evidence is still returned.
   }
 
-  return NextResponse.json({ caseData: data, analysis });
+  return NextResponse.json(
+    { caseData: data, analysis },
+    {
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "X-PAYMENT-RESPONSE": "verified",
+      },
+    }
+  );
 }
