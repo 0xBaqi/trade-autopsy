@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { CHAINS, rpcCall, hexToDecString, isValidTxHash, TRANSFER_TOPIC } from "../../../lib/chains";
-import { extractPayment, verifyPayment, paymentRequiredResponse, buildPaymentRequired } from "../../../lib/x402";
+import { extractPayment, verifyPayment, paymentRequiredResponse, buildPaymentRequired, isInternalRequest } from "../../../lib/x402";
 
 // Handle CORS preflight
 export async function OPTIONS() {
@@ -9,7 +9,7 @@ export async function OPTIONS() {
     headers: {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, X-PAYMENT, x-payment",
+      "Access-Control-Allow-Headers": "Content-Type, X-PAYMENT, x-payment, X-INTERNAL-KEY",
     },
   });
 }
@@ -18,21 +18,25 @@ export async function POST(req) {
   const resourceUrl = `${process.env.NEXT_PUBLIC_BASE_URL || "https://trade-autopsy-addr.vercel.app"}/api/analyze`;
   const description = "Trade Autopsy: plain-English post-mortem for any EVM transaction hash";
 
-  // x402 payment check
-  // If no payment header, return 402 challenge
-  const paymentHeader = extractPayment(req);
-  if (!paymentHeader) {
-    return paymentRequiredResponse(resourceUrl, description);
-  }
+  // Skip x402 for internal frontend requests
+  const internal = isInternalRequest(req);
 
-  // Verify payment with OKX facilitator (skipped if no OKX API keys = free mode)
-  const requirements = buildPaymentRequired(resourceUrl, description);
-  const verification = await verifyPayment(paymentHeader, requirements);
-  if (!verification.valid && !verification.skipped) {
-    return NextResponse.json(
-      { error: "Payment verification failed", details: verification.error },
-      { status: 402 }
-    );
+  if (!internal) {
+    // x402 payment check for external agent-to-agent calls
+    const paymentHeader = extractPayment(req);
+    if (!paymentHeader) {
+      return paymentRequiredResponse(resourceUrl, description);
+    }
+
+    // Verify payment with OKX facilitator
+    const requirements = buildPaymentRequired(resourceUrl, description);
+    const verification = await verifyPayment(paymentHeader, requirements);
+    if (!verification.valid && !verification.skipped) {
+      return NextResponse.json(
+        { error: "Payment verification failed", details: verification.error },
+        { status: 402 }
+      );
+    }
   }
 
   // Payment verified (or in free/test mode) — proceed with analysis

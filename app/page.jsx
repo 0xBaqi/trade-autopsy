@@ -77,7 +77,10 @@ export default function TradeAutopsy() {
     try {
       const res = await fetch("/api/analyze", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-INTERNAL-KEY": "trade-autopsy-internal",
+        },
         body: JSON.stringify({ hash: hash.trim(), chainId: candidate.chainId }),
       });
       const json = await res.json();
