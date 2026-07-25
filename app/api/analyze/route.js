@@ -2,6 +2,26 @@ import { NextResponse } from "next/server";
 import { CHAINS, rpcCall, hexToDecString, isValidTxHash, TRANSFER_TOPIC } from "../../../lib/chains";
 import { extractPayment, verifyPayment, paymentRequiredResponse, buildPaymentRequired, isInternalRequest } from "../../../lib/x402";
 
+// GET handler for health/discovery checks by onchainos and OKX review bot
+export async function GET() {
+  return new Response(
+    JSON.stringify({
+      status: "ok",
+      service: "Trade Autopsy",
+      description: "Plain-English post-mortem for any EVM transaction hash",
+      payment: { protocol: "x402", version: 2, network: "eip155:196", price: "$0.01" },
+    }),
+    {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+        "X-ACCEPTS-PAYMENT": "x402",
+      },
+    }
+  );
+}
+
 // Handle CORS preflight
 export async function OPTIONS() {
   return new Response(null, {
