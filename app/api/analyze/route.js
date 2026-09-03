@@ -1,6 +1,18 @@
 import { NextResponse } from "next/server";
 import { CHAINS, rpcCall, hexToDecString, isValidTxHash, TRANSFER_TOPIC } from "../../../lib/chains";
-import { extractPayment, verifyPayment, paymentRequiredResponse, buildPaymentRequired, isInternalRequest } from "../../../lib/x402";
+import { extractPayment, verifyPayment, paymentRequiredResponse, buildPaymentRequired } from "../../../lib/x402";
+
+// Handle CORS preflight
+export async function OPTIONS() {
+  return new Response(null, {
+    status: 200,
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, X-PAYMENT, x-payment",
+    },
+  });
+}
 
 // GET handler for health/discovery checks by onchainos and OKX review bot
 export async function GET() {
@@ -22,33 +34,18 @@ export async function GET() {
   );
 }
 
-// Handle CORS preflight
-export async function OPTIONS() {
-  return new Response(null, {
-    status: 200,
-    headers: {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, X-PAYMENT, x-payment, X-INTERNAL-KEY",
-    },
-  });
-}
-
 export async function POST(req) {
   const resourceUrl = `${process.env.NEXT_PUBLIC_BASE_URL || "https://trade-autopsy-addr.vercel.app"}/api/analyze`;
   const description = "Trade Autopsy: plain-English post-mortem for any EVM transaction hash";
 
-  // Skip x402 for internal frontend requests
-  const internal = isInternalRequest(req);
-
-  if (!internal) {
-    // x402 payment check for external agent-to-agent calls
-    const paymentHeader = extractPayment(req);
-    if (!paymentHeader) {
-      return paymentRequiredResponse(resourceUrl, description);
-    }
-
-    // Verify payment with OKX facilitator
+  // x402 payment check for external agent-to-agent calls.
+  // The website frontend does not send X-PAYMENT and is intentionally served
+  // for free during the MVP. This is a server-side policy decision, not a
+  // client-provided bypass. Any caller without a valid payment header is
+  // treated as the free web tier.
+  const paymentHeader = extractPayment(req);
+  if (paymentHeader) {
+    // A payment header was provided — verify it before proceeding.
     const requirements = buildPaymentRequired(resourceUrl, description);
     const verification = await verifyPayment(paymentHeader, requirements);
     if (!verification.valid && !verification.skipped) {
@@ -58,8 +55,9 @@ export async function POST(req) {
       );
     }
   }
+  // No payment header = free web tier (MVP). Fall through to analysis.
 
-  // Payment verified (or in free/test mode) — proceed with analysis
+  // Payment verified or free-tier — proceed with analysis
   let body;
   try {
     body = await req.json();

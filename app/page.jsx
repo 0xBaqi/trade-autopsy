@@ -79,7 +79,7 @@ export default function TradeAutopsy() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-INTERNAL-KEY": "trade-autopsy-internal",
+          
         },
         body: JSON.stringify({ hash: hash.trim(), chainId: candidate.chainId }),
       });
