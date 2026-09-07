@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { CHAINS, rpcCall, hexToDecString, isValidTxHash, TRANSFER_TOPIC } from "../../../lib/chains";
 import { extractPayment, verifyPayment, paymentRequiredResponse, buildPaymentRequired } from "../../../lib/x402";
+import { checkFreeTierLimit, getClientIp } from "../../../lib/rateLimit";
 
 // Handle CORS preflight
 export async function OPTIONS() {
@@ -38,14 +39,12 @@ export async function POST(req) {
   const resourceUrl = `${process.env.NEXT_PUBLIC_BASE_URL || "https://trade-autopsy-addr.vercel.app"}/api/analyze`;
   const description = "Trade Autopsy: plain-English post-mortem for any EVM transaction hash";
 
-  // x402 payment check for external agent-to-agent calls.
-  // The website frontend does not send X-PAYMENT and is intentionally served
-  // for free during the MVP. This is a server-side policy decision, not a
-  // client-provided bypass. Any caller without a valid payment header is
-  // treated as the free web tier.
+  // Determine whether this is a paid x402 request or a free-tier request.
   const paymentHeader = extractPayment(req);
+
   if (paymentHeader) {
-    // A payment header was provided — verify it before proceeding.
+    // --- PAID PATH ---
+    // Verify the x402 payment. Paid requests are not subject to the free-tier limit.
     const requirements = buildPaymentRequired(resourceUrl, description);
     const verification = await verifyPayment(paymentHeader, requirements);
     if (!verification.valid && !verification.skipped) {
@@ -54,10 +53,33 @@ export async function POST(req) {
         { status: 402 }
       );
     }
+    // Payment verified — fall through to analysis.
+  } else {
+    // --- FREE TIER PATH ---
+    // Apply per-IP rate limiting. This is best-effort: in-memory state is
+    // not shared across serverless instances (see lib/rateLimit.js).
+    const ip = getClientIp(req);
+    const { allowed, retryAfter } = checkFreeTierLimit(ip);
+    if (!allowed) {
+      return new Response(
+        JSON.stringify({
+          error: "Too many free analyses. Please wait before trying again.",
+          retryAfter,
+        }),
+        {
+          status: 429,
+          headers: {
+            "Content-Type": "application/json",
+            "Retry-After": String(retryAfter),
+            "Access-Control-Allow-Origin": "*",
+          },
+        }
+      );
+    }
+    // Under the limit — fall through to analysis.
   }
-  // No payment header = free web tier (MVP). Fall through to analysis.
 
-  // Payment verified or free-tier — proceed with analysis
+  // --- ANALYSIS ---
   let body;
   try {
     body = await req.json();
