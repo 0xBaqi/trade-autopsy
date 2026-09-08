@@ -6,6 +6,7 @@ import { formatTokenAmount, resolveTokenMetadata } from "../../../lib/tokenMetad
 import { classifyTransaction } from "../../../lib/transactionClassification";
 import { reconstructAssetFlows } from "../../../lib/assetFlows";
 import { detectSwapClassification } from "../../../lib/swapDetection";
+import { buildActivityEvidence } from "../../../lib/activityEvidence";
 import { generateGroundedAnalysis } from "../../../lib/openaiAnalysis";
 import { buildDeterministicAnalysis } from "../../../lib/deterministicAnalysis";
 
@@ -181,6 +182,7 @@ export async function POST(req) {
       ? detectSwapClassification({ tx, receipt, assetFlows })
       : null;
   const classification = swapClassification || baseClassification;
+  const activities = buildActivityEvidence({ classification, tokenTransfers });
 
   const data = {
     hash,
@@ -199,6 +201,7 @@ export async function POST(req) {
     tokenTransfers,
     classification,
     assetFlows,
+    activities,
   };
 
   // The deterministic explanation is the baseline product. OpenAI is an
