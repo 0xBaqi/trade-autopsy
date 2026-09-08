@@ -5,6 +5,8 @@ import { checkFreeTierLimit, getClientIp } from "../../../lib/rateLimit";
 import { formatTokenAmount, resolveTokenMetadata } from "../../../lib/tokenMetadata";
 import { classifyTransaction } from "../../../lib/transactionClassification";
 import { reconstructAssetFlows } from "../../../lib/assetFlows";
+import { generateGroundedAnalysis } from "../../../lib/openaiAnalysis";
+import { buildDeterministicAnalysis } from "../../../lib/deterministicAnalysis";
 
 // Handle CORS preflight
 export async function OPTIONS() {
@@ -193,75 +195,17 @@ export async function POST(req) {
     assetFlows,
   };
 
-  const facts = `
-Chain: ${data.chain.name}
-Transaction hash: ${data.hash}
-Status: ${data.success ? "SUCCESS" : "REVERTED/FAILED"}
-From: ${data.from}
-To: ${data.to || "(contract creation)"}
-Native value sent: ${data.value} ${data.chain.symbol}
-Gas used: ${data.gasUsed} of ${data.gasLimit} limit (${data.gasUsedPct}%)
-Network fee paid: ${data.feeEth} ${data.chain.symbol}
-Number of event logs emitted: ${data.logCount}
-Number of token Transfer events: ${data.transferCount}
-Block number: ${data.blockNumber}
-  `.trim();
-
-  const prompt = `You are a blockchain forensic analyst writing a short case report for a non-technical crypto user about a single on-chain transaction. Here are the raw facts pulled from the chain:
-
-${facts}
-
-Write a plain-language report with exactly these sections, each on its own line prefixed by the label shown:
-VERDICT: one of [clean, costly, failed, warning] — pick "failed" if status is reverted, "costly" if it succeeded but gas usage/fees look unusually high relative to a simple transfer, "warning" if something looks off (e.g. very high gas usage % suggesting a near-failure, zero transfers on a contract call, or unusual patterns), otherwise "clean".
-SUMMARY: 1-2 plain sentences describing what this transaction most likely did, in everyday language, no jargon.
-WHY: 1-2 sentences explaining the specific reason for the outcome (why it failed, why it cost what it cost, or why it's routine) — reference the actual numbers.
-TIP: one short, concrete, actionable sentence of advice for next time, relevant to what happened here.
-
-Do not use markdown formatting, headers, or bullet points. Keep each section to the sentence counts specified.`;
-
-  let analysis = {
-    verdict: "warning",
-    summary: "The transaction data was retrieved, but the analysis couldn't be generated.",
-    why: "The analysis service didn't respond as expected.",
-    tip: "You can still review the raw evidence below.",
-  };
+  // The deterministic explanation is the baseline product. OpenAI is an
+  // optional polish layer: missing credit, missing credentials, or provider
+  // failure must never make the transaction report unusable.
+  let analysis = buildDeterministicAnalysis(data);
 
   try {
-    const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": process.env.ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 1000,
-        messages: [{ role: "user", content: prompt }],
-      }),
-    });
-
-    const json = await anthropicRes.json();
-    const text = (json.content || [])
-      .filter((b) => b.type === "text")
-      .map((b) => b.text)
-      .join("\n");
-
-    const parsed = { verdict: "warning", summary: "", why: "", tip: "" };
-    let matchedAny = false;
-    text.split("\n").forEach((line) => {
-      const m = line.match(/^(VERDICT|SUMMARY|WHY|TIP):\s*(.*)$/i);
-      if (m) {
-        matchedAny = true;
-        parsed[m[1].toLowerCase()] = m[2].trim();
-      }
-    });
-    if (matchedAny) {
-      if (!["clean", "costly", "failed", "warning"].includes(parsed.verdict)) parsed.verdict = "warning";
-      analysis = parsed;
-    }
+    const groundedAnalysis = await generateGroundedAnalysis(data);
+    if (groundedAnalysis) analysis = groundedAnalysis;
   } catch (e) {
-    // Keep the fallback analysis above; the raw evidence is still returned.
+    console.error("[analysis] OpenAI explanation failed:", e?.message || e);
+    // Keep the deterministic explanation above.
   }
 
   return NextResponse.json(
