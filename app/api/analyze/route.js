@@ -5,6 +5,7 @@ import { checkFreeTierLimit, getClientIp } from "../../../lib/rateLimit";
 import { formatTokenAmount, resolveTokenMetadata } from "../../../lib/tokenMetadata";
 import { classifyTransaction } from "../../../lib/transactionClassification";
 import { reconstructAssetFlows } from "../../../lib/assetFlows";
+import { detectSwapClassification } from "../../../lib/swapDetection";
 import { generateGroundedAnalysis } from "../../../lib/openaiAnalysis";
 import { buildDeterministicAnalysis } from "../../../lib/deterministicAnalysis";
 
@@ -173,8 +174,13 @@ export async function POST(req) {
     };
   });
 
-  const classification = classifyTransaction({ tx, receipt, tokenTransfers });
+  const baseClassification = classifyTransaction({ tx, receipt, tokenTransfers });
   const assetFlows = reconstructAssetFlows({ tx, receipt, chain, tokenTransfers });
+  const swapClassification =
+    baseClassification.type === "CONTRACT_INTERACTION"
+      ? detectSwapClassification({ tx, receipt, assetFlows })
+      : null;
+  const classification = swapClassification || baseClassification;
 
   const data = {
     hash,
