@@ -121,9 +121,26 @@ export async function POST(req) {
   const gasUsedPct = gasLimit > 0n ? Number((gasUsed * 10000n) / gasLimit) / 100 : null;
   const value = hexToDecString(tx.value, 18);
 
-  const transferLogs = (receipt.logs || []).filter(
-    (l) => l.topics && l.topics[0] && l.topics[0].toLowerCase() === TRANSFER_TOPIC.toLowerCase()
-  );
+  // ERC-20 and ERC-721 share the Transfer(address,address,uint256) signature.
+  // A standard ERC-20 Transfer has exactly 3 topics and a single 32-byte
+  // uint256 in data. Restrict decoding to that shape so NFT token IDs are not
+  // accidentally reported as fungible-token amounts.
+  const uint256DataPattern = /^0x[0-9a-fA-F]{64}$/;
+  const tokenTransfers = (receipt.logs || [])
+    .filter(
+      (log) =>
+        log.address &&
+        Array.isArray(log.topics) &&
+        log.topics.length === 3 &&
+        log.topics[0]?.toLowerCase() === TRANSFER_TOPIC.toLowerCase() &&
+        uint256DataPattern.test(log.data || "")
+    )
+    .map((log) => ({
+      tokenAddress: log.address,
+      from: `0x${log.topics[1].slice(-40)}`,
+      to: `0x${log.topics[2].slice(-40)}`,
+      rawAmount: BigInt(log.data).toString(),
+    }));
 
   const data = {
     hash,
@@ -138,7 +155,8 @@ export async function POST(req) {
     gasUsedPct,
     blockNumber: parseInt(receipt.blockNumber, 16),
     logCount: (receipt.logs || []).length,
-    transferCount: transferLogs.length,
+    transferCount: tokenTransfers.length,
+    tokenTransfers,
   };
 
   const facts = `
@@ -155,17 +173,7 @@ Number of token Transfer events: ${data.transferCount}
 Block number: ${data.blockNumber}
   `.trim();
 
-  const prompt = `You are a blockchain forensic analyst writing a short case report for a non-technical crypto user about a single on-chain transaction. Here are the raw facts pulled from the chain:
-
-${facts}
-
-Write a plain-language report with exactly these sections, each on its own line prefixed by the label shown:
-VERDICT: one of [clean, costly, failed, warning] — pick "failed" if status is reverted, "costly" if it succeeded but gas usage/fees look unusually high relative to a simple transfer, "warning" if something looks off (e.g. very high gas usage % suggesting a near-failure, zero transfers on a contract call, or unusual patterns), otherwise "clean".
-SUMMARY: 1-2 plain sentences describing what this transaction most likely did, in everyday language, no jargon.
-WHY: 1-2 sentences explaining the specific reason for the outcome (why it failed, why it cost what it cost, or why it's routine) — reference the actual numbers.
-TIP: one short, concrete, actionable sentence of advice for next time, relevant to what happened here.
-
-Do not use markdown formatting, headers, or bullet points. Keep each section to the sentence counts specified.`;
+  const prompt = `You are a blockchain forensic analyst writing a short case report for a non-technical crypto user about a single on-chain transaction. Here are the raw facts pulled from the chain:\n\n${facts}\n\nWrite a plain-language report with exactly these sections, each on its own line prefixed by the label shown:\nVERDICT: one of [clean, costly, failed, warning] — pick "failed" if status is reverted, "costly" if it succeeded but gas usage/fees look unusually high relative to a simple transfer, "warning" if something looks off (e.g. very high gas usage % suggesting a near-failure, zero transfers on a contract call, or unusual patterns), otherwise "clean".\nSUMMARY: 1-2 plain sentences describing what this transaction most likely did, in everyday language, no jargon.\nWHY: 1-2 sentences explaining the specific reason for the outcome (why it failed, why it cost what it cost, or why it's routine) — reference the actual numbers.\nTIP: one short, concrete, actionable sentence of advice for next time, relevant to what happened here.\n\nDo not use markdown formatting, headers, or bullet points. Keep each section to the sentence counts specified.`;
 
   let analysis = {
     verdict: "warning",
