@@ -4,6 +4,7 @@ import { extractPayment, verifyPayment, paymentRequiredResponse, buildPaymentReq
 import { checkFreeTierLimit, getClientIp } from "../../../lib/rateLimit";
 import { formatTokenAmount, resolveTokenMetadata } from "../../../lib/tokenMetadata";
 import { classifyTransaction } from "../../../lib/transactionClassification";
+import { reconstructAssetFlows } from "../../../lib/assetFlows";
 
 // Handle CORS preflight
 export async function OPTIONS() {
@@ -171,6 +172,7 @@ export async function POST(req) {
   });
 
   const classification = classifyTransaction({ tx, receipt, tokenTransfers });
+  const assetFlows = reconstructAssetFlows({ tx, receipt, chain, tokenTransfers });
 
   const data = {
     hash,
@@ -188,6 +190,7 @@ export async function POST(req) {
     transferCount: tokenTransfers.length,
     tokenTransfers,
     classification,
+    assetFlows,
   };
 
   const facts = `
