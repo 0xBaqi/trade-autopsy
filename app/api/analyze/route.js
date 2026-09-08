@@ -3,6 +3,7 @@ import { CHAINS, rpcCall, hexToDecString, isValidTxHash, TRANSFER_TOPIC } from "
 import { extractPayment, verifyPayment, paymentRequiredResponse, buildPaymentRequired } from "../../../lib/x402";
 import { checkFreeTierLimit, getClientIp } from "../../../lib/rateLimit";
 import { formatTokenAmount, resolveTokenMetadata } from "../../../lib/tokenMetadata";
+import { classifyTransaction } from "../../../lib/transactionClassification";
 
 // Handle CORS preflight
 export async function OPTIONS() {
@@ -169,6 +170,8 @@ export async function POST(req) {
     };
   });
 
+  const classification = classifyTransaction({ tx, receipt, tokenTransfers });
+
   const data = {
     hash,
     chain: { id: chain.id, name: chain.name, symbol: chain.symbol, explorer: chain.explorer },
@@ -184,6 +187,7 @@ export async function POST(req) {
     logCount: (receipt.logs || []).length,
     transferCount: tokenTransfers.length,
     tokenTransfers,
+    classification,
   };
 
   const facts = `
