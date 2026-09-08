@@ -4,10 +4,10 @@ import { useState, useRef, useEffect } from "react";
 import { Search, FileWarning, CheckCircle2, XCircle, AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
 
 const VERDICT_STYLES = {
-  clean: { label: "CLEAN TRADE", color: "#2F5D62", Icon: CheckCircle2 },
-  costly: { label: "COSTLY MISTAKE", color: "#B0413E", Icon: AlertTriangle },
+  clean: { label: "ROUTINE TX", color: "#2F5D62", Icon: CheckCircle2 },
+  costly: { label: "HIGH COST", color: "#B0413E", Icon: AlertTriangle },
   failed: { label: "FAILED TX", color: "#B0413E", Icon: XCircle },
-  warning: { label: "WARNING SIGN", color: "#B0413E", Icon: FileWarning },
+  warning: { label: "NEEDS REVIEW", color: "#B0413E", Icon: FileWarning },
 };
 
 function short(addr) {
@@ -223,7 +223,7 @@ export default function TradeAutopsy() {
       <div className="autopsy-container">
         <div className="case-header">
           <div className="case-eyebrow">Trade Autopsy · Multi-Chain Case File</div>
-          <h1 className="case-title">What actually happened to your trade?</h1>
+          <h1 className="case-title">What actually happened on-chain?</h1>
           <p className="case-sub">
             Paste any EVM transaction hash — Ethereum, X Layer, and major L2s including Arbitrum, Base,
             Optimism, zkSync Era, Linea, Scroll, Blast, and more. This opens a case, detects the chain, pulls
