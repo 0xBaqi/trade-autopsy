@@ -148,12 +148,13 @@ export async function POST(req) {
 
   // Resolve metadata once per unique token contract. Metadata is optional:
   // non-standard/reverting contracts keep their raw evidence rather than
-  // receiving guessed symbol/decimal values.
+  // receiving guessed symbol/decimal values. Use the receipt block so the
+  // metadata reflects the contract state at the time of the transaction.
   const uniqueTokenAddresses = [...new Set(decodedTransfers.map((transfer) => transfer.tokenAddress.toLowerCase()))];
   const metadataEntries = await Promise.all(
     uniqueTokenAddresses.map(async (tokenAddress) => [
       tokenAddress,
-      await resolveTokenMetadata(chain, tokenAddress),
+      await resolveTokenMetadata(chain, tokenAddress, receipt.blockNumber),
     ])
   );
   const metadataByAddress = new Map(metadataEntries);
