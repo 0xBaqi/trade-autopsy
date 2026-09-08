@@ -121,9 +121,29 @@ export async function POST(req) {
   const gasUsedPct = gasLimit > 0n ? Number((gasUsed * 10000n) / gasLimit) / 100 : null;
   const value = hexToDecString(tx.value, 18);
 
-  const transferLogs = (receipt.logs || []).filter(
-    (l) => l.topics && l.topics[0] && l.topics[0].toLowerCase() === TRANSFER_TOPIC.toLowerCase()
-  );
+  // ERC-20 and ERC-721 share the Transfer(address,address,uint256) signature.
+  // A standard ERC-20 Transfer has exactly 3 topics and a single 32-byte
+  // uint256 in data. Restrict decoding to that shape so NFT token IDs are not
+  // accidentally reported as fungible-token amounts.
+  const topicPattern = /^0x[0-9a-fA-F]{64}$/;
+  const uint256DataPattern = /^0x[0-9a-fA-F]{64}$/;
+  const tokenTransfers = (receipt.logs || [])
+    .filter(
+      (log) =>
+        log.address &&
+        Array.isArray(log.topics) &&
+        log.topics.length === 3 &&
+        log.topics[0]?.toLowerCase() === TRANSFER_TOPIC.toLowerCase() &&
+        topicPattern.test(log.topics[1] || "") &&
+        topicPattern.test(log.topics[2] || "") &&
+        uint256DataPattern.test(log.data || "")
+    )
+    .map((log) => ({
+      tokenAddress: log.address,
+      from: `0x${log.topics[1].slice(-40)}`,
+      to: `0x${log.topics[2].slice(-40)}`,
+      rawAmount: BigInt(log.data).toString(),
+    }));
 
   const data = {
     hash,
@@ -138,7 +158,8 @@ export async function POST(req) {
     gasUsedPct,
     blockNumber: parseInt(receipt.blockNumber, 16),
     logCount: (receipt.logs || []).length,
-    transferCount: transferLogs.length,
+    transferCount: tokenTransfers.length,
+    tokenTransfers,
   };
 
   const facts = `
