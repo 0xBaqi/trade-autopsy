@@ -6,6 +6,7 @@ import { formatTokenAmount, resolveTokenMetadata } from "../../../lib/tokenMetad
 import { classifyTransaction } from "../../../lib/transactionClassification";
 import { reconstructAssetFlows } from "../../../lib/assetFlows";
 import { generateGroundedAnalysis } from "../../../lib/openaiAnalysis";
+import { buildDeterministicAnalysis } from "../../../lib/deterministicAnalysis";
 
 // Handle CORS preflight
 export async function OPTIONS() {
@@ -194,19 +195,17 @@ export async function POST(req) {
     assetFlows,
   };
 
-  let analysis = {
-    verdict: "warning",
-    summary: "The transaction data was retrieved, but the explanation couldn't be generated.",
-    why: "The explanation service didn't respond as expected.",
-    tip: "You can still review the deterministic evidence below.",
-  };
+  // The deterministic explanation is the baseline product. OpenAI is an
+  // optional polish layer: missing credit, missing credentials, or provider
+  // failure must never make the transaction report unusable.
+  let analysis = buildDeterministicAnalysis(data);
 
   try {
     const groundedAnalysis = await generateGroundedAnalysis(data);
     if (groundedAnalysis) analysis = groundedAnalysis;
   } catch (e) {
     console.error("[analysis] OpenAI explanation failed:", e?.message || e);
-    // Keep the fallback analysis above; deterministic evidence is still returned.
+    // Keep the deterministic explanation above.
   }
 
   return NextResponse.json(
