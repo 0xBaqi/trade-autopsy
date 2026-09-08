@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { CHAINS, rpcCall, hexToDecString, isValidTxHash, TRANSFER_TOPIC } from "../../../lib/chains";
 import { extractPayment, verifyPayment, paymentRequiredResponse, buildPaymentRequired } from "../../../lib/x402";
 import { checkFreeTierLimit, getClientIp } from "../../../lib/rateLimit";
+import { formatTokenAmount, resolveTokenMetadata } from "../../../lib/tokenMetadata";
 
 // Handle CORS preflight
 export async function OPTIONS() {
@@ -127,7 +128,7 @@ export async function POST(req) {
   // accidentally reported as fungible-token amounts.
   const topicPattern = /^0x[0-9a-fA-F]{64}$/;
   const uint256DataPattern = /^0x[0-9a-fA-F]{64}$/;
-  const tokenTransfers = (receipt.logs || [])
+  const decodedTransfers = (receipt.logs || [])
     .filter(
       (log) =>
         log.address &&
@@ -144,6 +145,28 @@ export async function POST(req) {
       to: `0x${log.topics[2].slice(-40)}`,
       rawAmount: BigInt(log.data).toString(),
     }));
+
+  // Resolve metadata once per unique token contract. Metadata is optional:
+  // non-standard/reverting contracts keep their raw evidence rather than
+  // receiving guessed symbol/decimal values.
+  const uniqueTokenAddresses = [...new Set(decodedTransfers.map((transfer) => transfer.tokenAddress.toLowerCase()))];
+  const metadataEntries = await Promise.all(
+    uniqueTokenAddresses.map(async (tokenAddress) => [
+      tokenAddress,
+      await resolveTokenMetadata(chain, tokenAddress),
+    ])
+  );
+  const metadataByAddress = new Map(metadataEntries);
+
+  const tokenTransfers = decodedTransfers.map((transfer) => {
+    const metadata = metadataByAddress.get(transfer.tokenAddress.toLowerCase()) || { symbol: null, decimals: null };
+    return {
+      ...transfer,
+      symbol: metadata.symbol,
+      decimals: metadata.decimals,
+      amount: formatTokenAmount(transfer.rawAmount, metadata.decimals),
+    };
+  });
 
   const data = {
     hash,
