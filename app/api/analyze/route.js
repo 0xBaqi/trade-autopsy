@@ -64,7 +64,7 @@ export async function POST(req) {
   const nativeTrace = success ? await traceNativeTransfers(chain, hash, tx, receipt) : { available: false, source: null, transfers: [], diagnostics: null };
   const baseClassification = classifyTransaction({ tx, receipt, tokenTransfers });
   const assetFlows = reconstructAssetFlows({ tx, receipt, chain, tokenTransfers, nativeTrace });
-  const bridgeClassification = baseClassification.type === "CONTRACT_INTERACTION" ? detectAcrossBridgeDeposit({ tx, receipt, assetFlows }) : null;
+  const bridgeClassification = baseClassification.type === "CONTRACT_INTERACTION" ? detectAcrossBridgeDeposit({ tx, receipt, assetFlows, chainId: chain.id }) : null;
   const swapClassification = !bridgeClassification && baseClassification.type === "CONTRACT_INTERACTION" ? detectSwapClassification({ tx, receipt, assetFlows, chainId: chain.id }) : null;
   const classification = bridgeClassification || swapClassification || baseClassification;
   const activities = buildActivityEvidence({ classification, tokenTransfers });
