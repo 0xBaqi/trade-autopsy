@@ -129,10 +129,6 @@ export async function POST(req) {
   const gasUsedPct = gasLimit > 0n ? Number((gasUsed * 10000n) / gasLimit) / 100 : null;
   const value = hexToDecString(tx.value, 18);
 
-  // ERC-20 and ERC-721 share the Transfer(address,address,uint256) signature.
-  // A standard ERC-20 Transfer has exactly 3 topics and a single 32-byte
-  // uint256 in data. Restrict decoding to that shape so NFT token IDs are not
-  // accidentally reported as fungible-token amounts.
   const topicPattern = /^0x[0-9a-fA-F]{64}$/;
   const uint256DataPattern = /^0x[0-9a-fA-F]{64}$/;
   const decodedTransfers = (receipt.logs || [])
@@ -153,10 +149,6 @@ export async function POST(req) {
       rawAmount: BigInt(log.data).toString(),
     }));
 
-  // Resolve metadata once per unique token contract. Metadata is optional:
-  // non-standard/reverting contracts keep their raw evidence rather than
-  // receiving guessed symbol/decimal values. Use the receipt block so the
-  // metadata reflects the contract state at the time of the transaction.
   const uniqueTokenAddresses = [...new Set(decodedTransfers.map((transfer) => transfer.tokenAddress.toLowerCase()))];
   const metadataEntries = await Promise.all(
     uniqueTokenAddresses.map(async (tokenAddress) => [
@@ -176,9 +168,7 @@ export async function POST(req) {
     };
   });
 
-  // Internal native movement is optional evidence. Many public RPCs do not
-  // expose debug tracing, so analysis must remain usable when tracing is absent.
-  const nativeTrace = success ? await traceNativeTransfers(chain, hash) : { available: false, source: null, transfers: [] };
+  const nativeTrace = success ? await traceNativeTransfers(chain, hash) : { available: false, source: null, transfers: [], diagnostics: null };
 
   const baseClassification = classifyTransaction({ tx, receipt, tokenTransfers });
   const assetFlows = reconstructAssetFlows({ tx, receipt, chain, tokenTransfers, nativeTrace });
@@ -210,13 +200,11 @@ export async function POST(req) {
       available: nativeTrace.available,
       source: nativeTrace.source,
       transferCount: nativeTrace.transfers.length,
+      diagnostics: nativeTrace.diagnostics || null,
     },
     activities,
   };
 
-  // The deterministic explanation is the baseline product. OpenAI is an
-  // optional polish layer: missing credit, missing credentials, or provider
-  // failure must never make the transaction report unusable.
   let analysis = buildDeterministicAnalysis(data);
 
   try {
@@ -224,7 +212,6 @@ export async function POST(req) {
     if (groundedAnalysis) analysis = groundedAnalysis;
   } catch (e) {
     console.error("[analysis] OpenAI explanation failed:", e?.message || e);
-    // Keep the deterministic explanation above.
   }
 
   return NextResponse.json(
