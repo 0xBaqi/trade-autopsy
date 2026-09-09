@@ -6,6 +6,7 @@ import { formatTokenAmount, resolveTokenMetadata } from "../../../lib/tokenMetad
 import { classifyTransaction } from "../../../lib/transactionClassification";
 import { reconstructAssetFlows } from "../../../lib/assetFlows";
 import { detectSwapClassification } from "../../../lib/swapDetection";
+import { detectAcrossBridgeDeposit } from "../../../lib/bridgeDetection";
 import { buildActivityEvidence } from "../../../lib/activityEvidence";
 import { traceNativeTransfers } from "../../../lib/nativeTrace";
 import { generateGroundedAnalysis } from "../../../lib/openaiAnalysis";
@@ -63,8 +64,9 @@ export async function POST(req) {
   const nativeTrace = success ? await traceNativeTransfers(chain, hash, tx, receipt) : { available: false, source: null, transfers: [], diagnostics: null };
   const baseClassification = classifyTransaction({ tx, receipt, tokenTransfers });
   const assetFlows = reconstructAssetFlows({ tx, receipt, chain, tokenTransfers, nativeTrace });
-  const swapClassification = baseClassification.type === "CONTRACT_INTERACTION" ? detectSwapClassification({ tx, receipt, assetFlows, chainId: chain.id }) : null;
-  const classification = swapClassification || baseClassification;
+  const bridgeClassification = baseClassification.type === "CONTRACT_INTERACTION" ? detectAcrossBridgeDeposit({ tx, receipt, assetFlows, chainId: chain.id }) : null;
+  const swapClassification = !bridgeClassification && baseClassification.type === "CONTRACT_INTERACTION" ? detectSwapClassification({ tx, receipt, assetFlows, chainId: chain.id }) : null;
+  const classification = bridgeClassification || swapClassification || baseClassification;
   const activities = buildActivityEvidence({ classification, tokenTransfers });
   const data = { hash, chain: { id: chain.id, name: chain.name, symbol: chain.symbol, explorer: chain.explorer }, success, from: tx.from, to: tx.to, value, feeEth, gasUsed: gasUsed.toString(), gasLimit: gasLimit.toString(), gasUsedPct, blockNumber: parseInt(receipt.blockNumber, 16), logCount: (receipt.logs || []).length, transferCount: tokenTransfers.length, tokenTransfers, classification, assetFlows, nativeTrace: { available: nativeTrace.available, source: nativeTrace.source, transferCount: nativeTrace.transfers.length, diagnostics: nativeTrace.diagnostics || null }, activities };
   let analysis = buildDeterministicAnalysis(data);
