@@ -7,6 +7,7 @@ import { classifyTransaction } from "../../../lib/transactionClassification";
 import { reconstructAssetFlows } from "../../../lib/assetFlows";
 import { detectSwapClassification } from "../../../lib/swapDetection";
 import { buildActivityEvidence } from "../../../lib/activityEvidence";
+import { traceNativeTransfers } from "../../../lib/nativeTrace";
 import { generateGroundedAnalysis } from "../../../lib/openaiAnalysis";
 import { buildDeterministicAnalysis } from "../../../lib/deterministicAnalysis";
 
@@ -175,8 +176,12 @@ export async function POST(req) {
     };
   });
 
+  // Internal native movement is optional evidence. Many public RPCs do not
+  // expose debug tracing, so analysis must remain usable when tracing is absent.
+  const nativeTrace = success ? await traceNativeTransfers(chain, hash) : { available: false, source: null, transfers: [] };
+
   const baseClassification = classifyTransaction({ tx, receipt, tokenTransfers });
-  const assetFlows = reconstructAssetFlows({ tx, receipt, chain, tokenTransfers });
+  const assetFlows = reconstructAssetFlows({ tx, receipt, chain, tokenTransfers, nativeTrace });
   const swapClassification =
     baseClassification.type === "CONTRACT_INTERACTION"
       ? detectSwapClassification({ tx, receipt, assetFlows })
@@ -201,6 +206,11 @@ export async function POST(req) {
     tokenTransfers,
     classification,
     assetFlows,
+    nativeTrace: {
+      available: nativeTrace.available,
+      source: nativeTrace.source,
+      transferCount: nativeTrace.transfers.length,
+    },
     activities,
   };
 
