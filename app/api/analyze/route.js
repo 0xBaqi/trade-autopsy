@@ -53,7 +53,10 @@ export async function POST(req) {
   const value = hexToDecString(tx.value, 18);
   const topicPattern = /^0x[0-9a-fA-F]{64}$/;
   const uint256DataPattern = /^0x[0-9a-fA-F]{64}$/;
-  const decodedTransfers = (receipt.logs || []).filter((log) => log.address && Array.isArray(log.topics) && log.topics.length === 3 && log.topics[0]?.toLowerCase() === TRANSFER_TOPIC.toLowerCase() && topicPattern.test(log.topics[1] || "") && topicPattern.test(log.topics[2] || "") && uint256DataPattern.test(log.data || "")).map((log) => ({ tokenAddress: log.address, from: `0x${log.topics[1].slice(-40)}`, to: `0x${log.topics[2].slice(-40)}`, rawAmount: BigInt(log.data).toString() }));
+  const decodedTransfers = (receipt.logs || []).filter((log) => log.address && Array.isArray(log.topics) && log.topics.length === 3 && log.topics[0]?.toLowerCase() === TRANSFER_TOPIC.toLowerCase() && topicPattern.test(log.topics[1] || "") && topicPattern.test(log.topics[2] || "") && uint256DataPattern.test(log.data || "")).map((log) => {
+    const parsedLogIndex = typeof log.logIndex === "string" && /^0x[0-9a-fA-F]+$/.test(log.logIndex) ? Number.parseInt(log.logIndex, 16) : Number.isInteger(log.logIndex) ? log.logIndex : null;
+    return { tokenAddress: log.address, from: `0x${log.topics[1].slice(-40)}`, to: `0x${log.topics[2].slice(-40)}`, rawAmount: BigInt(log.data).toString(), logIndex: Number.isSafeInteger(parsedLogIndex) ? parsedLogIndex : null };
+  });
   const uniqueTokenAddresses = [...new Set(decodedTransfers.map((transfer) => transfer.tokenAddress.toLowerCase()))];
   const metadataEntries = await Promise.all(uniqueTokenAddresses.map(async (tokenAddress) => [tokenAddress, await resolveTokenMetadata(chain, tokenAddress, receipt.blockNumber)]));
   const metadataByAddress = new Map(metadataEntries);
@@ -65,10 +68,16 @@ export async function POST(req) {
   const nativeTrace = success ? await traceNativeTransfers(chain, hash, tx, receipt) : { available: false, source: null, transfers: [], diagnostics: null };
   const baseClassification = classifyTransaction({ tx, receipt, tokenTransfers });
   const assetFlows = reconstructAssetFlows({ tx, receipt, chain, tokenTransfers, nativeTrace });
-  const bridgeClassification = baseClassification.type === "CONTRACT_INTERACTION" ? detectAcrossBridgeDeposit({ tx, receipt, assetFlows, chainId: chain.id }) : null;
-  const swapClassification = !bridgeClassification && baseClassification.type === "CONTRACT_INTERACTION" ? detectSwapClassification({ tx, receipt, assetFlows, chainId: chain.id }) : null;
-  const classification = bridgeClassification || swapClassification || baseClassification;
-  const activities = buildActivityEvidence({ classification, tokenTransfers });
+
+  // P2S: detectors run independently against the same verified evidence. The
+  // final classification remains a single overall label for compatibility,
+  // while activities can preserve every independently proven primary action.
+  const canDetectHigherLevelActions = baseClassification.type === "CONTRACT_INTERACTION";
+  const bridgeDetection = canDetectHigherLevelActions ? detectAcrossBridgeDeposit({ tx, receipt, assetFlows, chainId: chain.id }) : null;
+  const swapDetection = canDetectHigherLevelActions ? detectSwapClassification({ tx, receipt, assetFlows, chainId: chain.id, tokenTransfers }) : null;
+  const classification = bridgeDetection || swapDetection || baseClassification;
+  const detections = { bridge: bridgeDetection, swap: swapDetection };
+  const activities = buildActivityEvidence({ classification, detections, tokenTransfers });
   const actionSequence = reconstructActionSequence({ classification, activities });
   const data = { hash, chain: { id: chain.id, name: chain.name, symbol: chain.symbol, explorer: chain.explorer }, success, from: tx.from, to: tx.to, value, feeEth, gasUsed: gasUsed.toString(), gasLimit: gasLimit.toString(), gasUsedPct, blockNumber: parseInt(receipt.blockNumber, 16), logCount: (receipt.logs || []).length, transferCount: tokenTransfers.length, tokenTransfers, classification, assetFlows, nativeTrace: { available: nativeTrace.available, source: nativeTrace.source, transferCount: nativeTrace.transfers.length, diagnostics: nativeTrace.diagnostics || null }, activities, actionSequence };
   let analysis = buildDeterministicAnalysis(data);
