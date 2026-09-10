@@ -53,7 +53,10 @@ export async function POST(req) {
   const value = hexToDecString(tx.value, 18);
   const topicPattern = /^0x[0-9a-fA-F]{64}$/;
   const uint256DataPattern = /^0x[0-9a-fA-F]{64}$/;
-  const decodedTransfers = (receipt.logs || []).filter((log) => log.address && Array.isArray(log.topics) && log.topics.length === 3 && log.topics[0]?.toLowerCase() === TRANSFER_TOPIC.toLowerCase() && topicPattern.test(log.topics[1] || "") && topicPattern.test(log.topics[2] || "") && uint256DataPattern.test(log.data || "")).map((log) => ({ tokenAddress: log.address, from: `0x${log.topics[1].slice(-40)}`, to: `0x${log.topics[2].slice(-40)}`, rawAmount: BigInt(log.data).toString() }));
+  const decodedTransfers = (receipt.logs || []).filter((log) => log.address && Array.isArray(log.topics) && log.topics.length === 3 && log.topics[0]?.toLowerCase() === TRANSFER_TOPIC.toLowerCase() && topicPattern.test(log.topics[1] || "") && topicPattern.test(log.topics[2] || "") && uint256DataPattern.test(log.data || "")).map((log) => {
+    const parsedLogIndex = typeof log.logIndex === "string" && /^0x[0-9a-fA-F]+$/.test(log.logIndex) ? Number.parseInt(log.logIndex, 16) : Number.isInteger(log.logIndex) ? log.logIndex : null;
+    return { tokenAddress: log.address, from: `0x${log.topics[1].slice(-40)}`, to: `0x${log.topics[2].slice(-40)}`, rawAmount: BigInt(log.data).toString(), logIndex: Number.isSafeInteger(parsedLogIndex) ? parsedLogIndex : null };
+  });
   const uniqueTokenAddresses = [...new Set(decodedTransfers.map((transfer) => transfer.tokenAddress.toLowerCase()))];
   const metadataEntries = await Promise.all(uniqueTokenAddresses.map(async (tokenAddress) => [tokenAddress, await resolveTokenMetadata(chain, tokenAddress, receipt.blockNumber)]));
   const metadataByAddress = new Map(metadataEntries);
@@ -71,7 +74,7 @@ export async function POST(req) {
   // while activities can preserve every independently proven primary action.
   const canDetectHigherLevelActions = baseClassification.type === "CONTRACT_INTERACTION";
   const bridgeDetection = canDetectHigherLevelActions ? detectAcrossBridgeDeposit({ tx, receipt, assetFlows, chainId: chain.id }) : null;
-  const swapDetection = canDetectHigherLevelActions ? detectSwapClassification({ tx, receipt, assetFlows, chainId: chain.id }) : null;
+  const swapDetection = canDetectHigherLevelActions ? detectSwapClassification({ tx, receipt, assetFlows, chainId: chain.id, tokenTransfers }) : null;
   const classification = bridgeDetection || swapDetection || baseClassification;
   const detections = { bridge: bridgeDetection, swap: swapDetection };
   const activities = buildActivityEvidence({ classification, detections, tokenTransfers });
