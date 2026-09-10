@@ -17,6 +17,7 @@ const ACTION_LABELS = {
   APPROVAL: "APPROVAL",
   PERMIT2_PERMISSION: "PERMIT2 PERMISSION",
   ERC20_TRANSFER: "TOKEN TRANSFER",
+  NFT_TRANSFER: "NFT TRANSFER",
   NATIVE_TRANSFER: "NATIVE TRANSFER",
   CONTRACT_CREATION: "CONTRACT CREATION",
   CONTRACT_INTERACTION: "CONTRACT INTERACTION",
@@ -57,12 +58,32 @@ function displayAmount(asset) {
   return `${formatReadableAmount(amount)} ${asset.symbol || "token"}`;
 }
 
+function nftLabel(transfer) {
+  if (!transfer) return "NFT/item";
+  if (transfer.standard === "ERC721") return `ERC-721 NFT #${transfer.tokenId}`;
+  const quantity = transfer.quantity && transfer.quantity !== "1" ? ` × ${transfer.quantity}` : "";
+  return `ERC-1155 item #${transfer.tokenId}${quantity}`;
+}
+
+function nftMovementText(transfer, wallet) {
+  const fromWallet = transfer?.from?.toLowerCase() === wallet;
+  const toWallet = transfer?.to?.toLowerCase() === wallet;
+  const label = nftLabel(transfer);
+  if (fromWallet && !toWallet) return `${label} left the sender wallet for ${short(transfer.to)}.`;
+  if (toWallet && !fromWallet) return `${label} entered the sender wallet from ${short(transfer.from)}.`;
+  return `${label} moved from ${short(transfer.from)} to ${short(transfer.to)}.`;
+}
+
 function buildEvidenceTrail(caseData) {
   const items = [];
   const classification = caseData?.classification || {};
   const type = classification.type;
   const out = caseData?.assetFlows?.assetsOut?.[0];
   const incoming = caseData?.assetFlows?.assetsIn?.[0];
+  const nftTransfers = Array.isArray(caseData?.nftTransfers) ? caseData.nftTransfers : [];
+  const wallet = caseData?.from?.toLowerCase();
+  const walletNftTransfers = wallet ? nftTransfers.filter((transfer) => transfer?.from?.toLowerCase() === wallet || transfer?.to?.toLowerCase() === wallet) : [];
+  const visibleNftTransfers = walletNftTransfers.length > 0 ? walletNftTransfers : nftTransfers;
 
   items.push({ tone: "proved", text: `Transaction confirmed on ${caseData.chain.name} at block ${caseData.blockNumber}.` });
   items.push({ tone: caseData.success ? "proved" : "warning", text: caseData.success ? "The chain marked this transaction as successful." : "The chain marked this transaction as reverted." });
@@ -86,8 +107,13 @@ function buildEvidenceTrail(caseData) {
   } else if (type === "ERC20_TRANSFER" || type === "NATIVE_TRANSFER") {
     if (out) items.push({ tone: "proved", text: `${displayAmount(out)} left the sender.` });
     if (incoming) items.push({ tone: "proved", text: `${displayAmount(incoming)} entered the sender wallet.` });
+  } else if (type === "NFT_TRANSFER") {
+    for (const transfer of visibleNftTransfers) items.push({ tone: "proved", text: nftMovementText(transfer, wallet) });
+    items.push({ tone: "warning", text: "NFT transfer evidence proves movement, not whether it was a purchase, sale, gift, mint, or burn." });
   } else if (type === "CONTRACT_INTERACTION") {
     items.push({ tone: "warning", text: "A contract was called, but the available evidence does not prove one specific higher-level action." });
+    for (const transfer of visibleNftTransfers) items.push({ tone: "proved", text: nftMovementText(transfer, wallet) });
+    if (visibleNftTransfers.length > 0) items.push({ tone: "warning", text: "These ERC-721/ERC-1155 movements are verified, but their economic meaning is not proven by transfer events alone." });
   }
 
   return items;
@@ -173,7 +199,7 @@ export default function TradeAutopsy() {
           <div className="action-row"><ActionBadge type={caseData.classification?.type}/></div>
           <ActionSequence sequence={caseData.actionSequence}/>
           <div className="report-body"><div className="report-section"><div className="report-section-label">Summary</div><div className="report-section-text">{analysis.summary}</div></div><div className="report-section"><div className="report-section-label">Why</div><div className="report-section-text">{analysis.why}</div></div><div className="report-section"><div className="report-section-label">Tip for next time</div><div className="report-section-text">{analysis.tip}</div></div><a className="explorer-link" href={`${caseData.chain.explorer}${caseData.hash}`} target="_blank" rel="noreferrer">View on {caseData.chain.name} explorer →</a></div>
-          <hr className="divider"/><div className="facts-grid"><div className="fact"><div className="fact-label">Status</div><div className="fact-value">{caseData.success?"Success":"Reverted"}</div></div><div className="fact"><div className="fact-label">Network fee</div><div className="fact-value">{caseData.feeEth} {caseData.chain.symbol}</div></div><div className="fact"><div className="fact-label">From</div><div className="fact-value">{short(caseData.from)}</div></div><div className="fact"><div className="fact-label">To</div><div className="fact-value">{caseData.to?short(caseData.to):"Contract creation"}</div></div><div className="fact"><div className="fact-label">Gas used</div><div className="fact-value">{caseData.gasUsedPct!=null?`${caseData.gasUsedPct}% of limit`:caseData.gasUsed}</div></div><div className="fact"><div className="fact-label">Token transfers</div><div className="fact-value">{caseData.transferCount}</div></div></div>
+          <hr className="divider"/><div className="facts-grid"><div className="fact"><div className="fact-label">Status</div><div className="fact-value">{caseData.success?"Success":"Reverted"}</div></div><div className="fact"><div className="fact-label">Network fee</div><div className="fact-value">{caseData.feeEth} {caseData.chain.symbol}</div></div><div className="fact"><div className="fact-label">From</div><div className="fact-value">{short(caseData.from)}</div></div><div className="fact"><div className="fact-label">To</div><div className="fact-value">{caseData.to?short(caseData.to):"Contract creation"}</div></div><div className="fact"><div className="fact-label">Gas used</div><div className="fact-value">{caseData.gasUsedPct!=null?`${caseData.gasUsedPct}% of limit`:caseData.gasUsed}</div></div><div className="fact"><div className="fact-label">Token transfers</div><div className="fact-value">{caseData.transferCount}</div></div><div className="fact"><div className="fact-label">NFT / item movements</div><div className="fact-value">{caseData.nftTransferCount || 0}</div></div></div>
           <div className="evidence"><div className="evidence-title">Evidence trail</div>{buildEvidenceTrail(caseData).map((item,index)=><div className={`evidence-item evidence-${item.tone}`} key={`${item.text}-${index}`}><span className="evidence-mark">{item.tone==="proved"?"✓":item.tone==="warning"?"!":"→"}</span><span>{item.text}</span></div>)}</div>
           <button className="raw-toggle" onClick={()=>setShowRaw(s=>!s)}>Technical evidence{showRaw?<ChevronUp size={14}/>:<ChevronDown size={14}/>}</button>{showRaw&&<div className="raw-body">{JSON.stringify(caseData,null,2)}</div>}
         </div>}
