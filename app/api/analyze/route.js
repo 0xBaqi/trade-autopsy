@@ -44,7 +44,7 @@ export async function POST(req) {
 
   const success = receipt.status === "0x1";
   const gasUsed = BigInt(receipt.gasUsed || "0x0");
-  const gasPrice = BigInt(tx.gasPrice || receipt.effectiveGasPrice || "0x0");
+  const gasPrice = BigInt(receipt.effectiveGasPrice || tx.gasPrice || "0x0");
   const feeWei = gasUsed * gasPrice;
   const feeEth = hexToDecString("0x" + feeWei.toString(16), 18);
   const gasLimit = BigInt(tx.gas || "0x0");
