@@ -27,11 +27,32 @@ function short(addr) {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
 
+function formatReadableAmount(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return text;
+  if (!/^-?\d+(?:\.\d+)?$/.test(text)) return text;
+
+  const negative = text.startsWith("-");
+  const unsigned = negative ? text.slice(1) : text;
+  const [whole, fraction = ""] = unsigned.split(".");
+  if (!fraction) return `${negative ? "-" : ""}${whole}`;
+
+  const numeric = Number(unsigned);
+  if (!Number.isFinite(numeric)) return text;
+
+  let maxDecimals = 4;
+  if (numeric > 0 && numeric < 0.0001) maxDecimals = 8;
+  else if (numeric < 1) maxDecimals = 6;
+
+  const trimmedFraction = fraction.slice(0, maxDecimals).replace(/0+$/, "");
+  return `${negative ? "-" : ""}${whole}${trimmedFraction ? `.${trimmedFraction}` : ""}`;
+}
+
 function displayAmount(asset) {
   if (!asset) return null;
   const amount = asset.amount ?? asset.rawAmount;
   if (amount == null) return null;
-  return `${amount} ${asset.symbol || "token"}`;
+  return `${formatReadableAmount(amount)} ${asset.symbol || "token"}`;
 }
 
 function buildEvidenceTrail(caseData) {
