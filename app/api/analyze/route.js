@@ -10,6 +10,7 @@ import { detectAcrossBridgeDeposit } from "../../../lib/bridgeDetection";
 import { buildActivityEvidence } from "../../../lib/activityEvidence";
 import { reconstructActionSequence } from "../../../lib/actionSequence";
 import { traceNativeTransfers } from "../../../lib/nativeTrace";
+import { decodeNftTransfers } from "../../../lib/nftEvidence";
 import { generateGroundedAnalysis } from "../../../lib/openaiAnalysis";
 import { buildDeterministicAnalysis } from "../../../lib/deterministicAnalysis";
 
@@ -64,9 +65,10 @@ export async function POST(req) {
     const metadata = metadataByAddress.get(transfer.tokenAddress.toLowerCase()) || { symbol: null, decimals: null };
     return { ...transfer, symbol: metadata.symbol, decimals: metadata.decimals, amount: formatTokenAmount(transfer.rawAmount, metadata.decimals) };
   });
+  const nftTransfers = success ? decodeNftTransfers(receipt) : [];
 
   const nativeTrace = success ? await traceNativeTransfers(chain, hash, tx, receipt) : { available: false, source: null, transfers: [], diagnostics: null };
-  const baseClassification = classifyTransaction({ tx, receipt, tokenTransfers });
+  const baseClassification = classifyTransaction({ tx, receipt, tokenTransfers, nftTransfers });
   const assetFlows = reconstructAssetFlows({ tx, receipt, chain, tokenTransfers, nativeTrace });
 
   // P2S: detectors run independently against the same verified evidence. The
@@ -77,9 +79,9 @@ export async function POST(req) {
   const swapDetection = canDetectHigherLevelActions ? detectSwapClassification({ tx, receipt, assetFlows, chainId: chain.id, tokenTransfers }) : null;
   const classification = bridgeDetection || swapDetection || baseClassification;
   const detections = { bridge: bridgeDetection, swap: swapDetection };
-  const activities = buildActivityEvidence({ classification, detections, tokenTransfers });
+  const activities = buildActivityEvidence({ classification, detections, tokenTransfers, nftTransfers });
   const actionSequence = reconstructActionSequence({ classification, activities });
-  const data = { hash, chain: { id: chain.id, name: chain.name, symbol: chain.symbol, explorer: chain.explorer }, success, from: tx.from, to: tx.to, value, feeEth, gasUsed: gasUsed.toString(), gasLimit: gasLimit.toString(), gasUsedPct, blockNumber: parseInt(receipt.blockNumber, 16), logCount: (receipt.logs || []).length, transferCount: tokenTransfers.length, tokenTransfers, classification, assetFlows, nativeTrace: { available: nativeTrace.available, source: nativeTrace.source, transferCount: nativeTrace.transfers.length, diagnostics: nativeTrace.diagnostics || null }, activities, actionSequence };
+  const data = { hash, chain: { id: chain.id, name: chain.name, symbol: chain.symbol, explorer: chain.explorer }, success, from: tx.from, to: tx.to, value, feeEth, gasUsed: gasUsed.toString(), gasLimit: gasLimit.toString(), gasUsedPct, blockNumber: parseInt(receipt.blockNumber, 16), logCount: (receipt.logs || []).length, transferCount: tokenTransfers.length, tokenTransfers, nftTransferCount: nftTransfers.length, nftTransfers, classification, assetFlows, nativeTrace: { available: nativeTrace.available, source: nativeTrace.source, transferCount: nativeTrace.transfers.length, diagnostics: nativeTrace.diagnostics || null }, activities, actionSequence };
   let analysis = buildDeterministicAnalysis(data);
   try { const groundedAnalysis = await generateGroundedAnalysis(data); if (groundedAnalysis) analysis = groundedAnalysis; }
   catch (e) { console.error("[analysis] OpenAI explanation failed:", e?.message || e); }
