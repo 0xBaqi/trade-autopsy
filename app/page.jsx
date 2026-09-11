@@ -11,188 +11,81 @@ const VERDICT_STYLES = {
 };
 
 const ACTION_LABELS = {
-  SWAP: "SWAP",
-  BRIDGE: "BRIDGE",
-  TOKEN_APPROVAL: "APPROVAL",
-  APPROVAL: "APPROVAL",
-  PERMIT2_PERMISSION: "PERMIT2 PERMISSION",
-  ERC20_TRANSFER: "TOKEN TRANSFER",
-  NFT_TRANSFER: "NFT TRANSFER",
-  NFT_MINT: "NFT MINT",
-  NFT_BURN: "NFT BURN",
-  NATIVE_TRANSFER: "NATIVE TRANSFER",
-  CONTRACT_CREATION: "CONTRACT CREATION",
-  CONTRACT_INTERACTION: "CONTRACT INTERACTION",
-  FAILED: "FAILED ATTEMPT",
-  UNKNOWN: "UNKNOWN ACTION",
+  SWAP: "SWAP", BRIDGE: "BRIDGE", TOKEN_APPROVAL: "APPROVAL", APPROVAL: "APPROVAL",
+  PERMIT2_PERMISSION: "PERMIT2 PERMISSION", ERC20_TRANSFER: "TOKEN TRANSFER", NFT_TRANSFER: "NFT TRANSFER",
+  NFT_MINT: "NFT MINT", NFT_BURN: "NFT BURN", NATIVE_TRANSFER: "NATIVE TRANSFER",
+  CONTRACT_CREATION: "CONTRACT CREATION", CONTRACT_INTERACTION: "CONTRACT INTERACTION",
+  FAILED: "FAILED ATTEMPT", UNKNOWN: "UNKNOWN ACTION",
 };
 
-function short(addr) {
-  if (!addr || addr.length < 10) return addr;
-  return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
-}
-
+function short(addr) { if (!addr || addr.length < 10) return addr; return `${addr.slice(0, 6)}…${addr.slice(-4)}`; }
 function formatReadableAmount(value) {
-  const text = String(value ?? "").trim();
-  if (!text) return text;
-  if (!/^-?\d+(?:\.\d+)?$/.test(text)) return text;
-
-  const negative = text.startsWith("-");
-  const unsigned = negative ? text.slice(1) : text;
-  const [whole, fraction = ""] = unsigned.split(".");
-  if (!fraction) return `${negative ? "-" : ""}${whole}`;
-
-  const numeric = Number(unsigned);
-  if (!Number.isFinite(numeric)) return text;
-
-  let maxDecimals = 4;
-  if (numeric > 0 && numeric < 0.0001) maxDecimals = 8;
-  else if (numeric < 1) maxDecimals = 6;
-
-  const trimmedFraction = fraction.slice(0, maxDecimals).replace(/0+$/, "");
-  return `${negative ? "-" : ""}${whole}${trimmedFraction ? `.${trimmedFraction}` : ""}`;
+  const text = String(value ?? "").trim(); if (!text) return text; if (!/^-?\d+(?:\.\d+)?$/.test(text)) return text;
+  const negative = text.startsWith("-"); const unsigned = negative ? text.slice(1) : text; const [whole, fraction = ""] = unsigned.split(".");
+  if (!fraction) return `${negative ? "-" : ""}${whole}`; const numeric = Number(unsigned); if (!Number.isFinite(numeric)) return text;
+  let maxDecimals = 4; if (numeric > 0 && numeric < 0.0001) maxDecimals = 8; else if (numeric < 1) maxDecimals = 6;
+  const trimmedFraction = fraction.slice(0, maxDecimals).replace(/0+$/, ""); return `${negative ? "-" : ""}${whole}${trimmedFraction ? `.${trimmedFraction}` : ""}`;
 }
-
-function displayAmount(asset) {
-  if (!asset) return null;
-  const amount = asset.amount ?? asset.rawAmount;
-  if (amount == null) return null;
-  return `${formatReadableAmount(amount)} ${asset.symbol || "token"}`;
-}
-
-function nftLabel(transfer) {
-  if (!transfer) return "NFT/item";
-  if (transfer.standard === "ERC721") return `ERC-721 NFT #${transfer.tokenId}`;
-  const quantity = transfer.quantity && transfer.quantity !== "1" ? ` × ${transfer.quantity}` : "";
-  return `ERC-1155 item #${transfer.tokenId}${quantity}`;
-}
-
+function displayAmount(asset) { if (!asset) return null; const amount = asset.amount ?? asset.rawAmount; if (amount == null) return null; return `${formatReadableAmount(amount)} ${asset.symbol || "token"}`; }
+function isPositiveNftMovement(transfer) { if (transfer?.standard !== "ERC1155") return transfer?.standard === "ERC721"; try { return BigInt(transfer?.quantity ?? "0") > 0n; } catch { return false; } }
+function nftLabel(transfer) { if (!transfer) return "NFT/item"; if (transfer.standard === "ERC721") return `ERC-721 NFT #${transfer.tokenId}`; const quantity = transfer.quantity && transfer.quantity !== "1" ? ` × ${transfer.quantity}` : ""; return `ERC-1155 item #${transfer.tokenId}${quantity}`; }
 function nftMovementText(transfer, wallet) {
-  const fromWallet = transfer?.from?.toLowerCase() === wallet;
-  const toWallet = transfer?.to?.toLowerCase() === wallet;
-  const label = nftLabel(transfer);
+  const fromWallet = transfer?.from?.toLowerCase() === wallet; const toWallet = transfer?.to?.toLowerCase() === wallet; const label = nftLabel(transfer);
   if (fromWallet && !toWallet) return `${label} left the sender wallet for ${short(transfer.to)}.`;
   if (toWallet && !fromWallet) return `${label} entered the sender wallet from ${short(transfer.from)}.`;
   return `${label} moved from ${short(transfer.from)} to ${short(transfer.to)}.`;
 }
 
 function buildEvidenceTrail(caseData) {
-  const items = [];
-  const classification = caseData?.classification || {};
-  const type = classification.type;
-  const out = caseData?.assetFlows?.assetsOut?.[0];
-  const incoming = caseData?.assetFlows?.assetsIn?.[0];
-  const nftTransfers = Array.isArray(caseData?.nftTransfers) ? caseData.nftTransfers : [];
-  const wallet = caseData?.from?.toLowerCase();
-  const walletNftTransfers = wallet ? nftTransfers.filter((transfer) => transfer?.from?.toLowerCase() === wallet || transfer?.to?.toLowerCase() === wallet) : [];
-
+  const items = []; const classification = caseData?.classification || {}; const type = classification.type;
+  const out = caseData?.assetFlows?.assetsOut?.[0]; const incoming = caseData?.assetFlows?.assetsIn?.[0];
+  const nftTransfers = Array.isArray(caseData?.nftTransfers) ? caseData.nftTransfers : []; const wallet = caseData?.from?.toLowerCase();
+  const walletNftTransfers = wallet ? nftTransfers.filter((transfer) => isPositiveNftMovement(transfer) && (transfer?.from?.toLowerCase() === wallet || transfer?.to?.toLowerCase() === wallet)) : [];
   items.push({ tone: "proved", text: `Transaction confirmed on ${caseData.chain.name} at block ${caseData.blockNumber}.` });
   items.push({ tone: caseData.success ? "proved" : "warning", text: caseData.success ? "The chain marked this transaction as successful." : "The chain marked this transaction as reverted." });
-
   if (type === "BRIDGE" && classification.bridge) {
-    const bridge = classification.bridge;
-    const chainNames = { "1": "Ethereum", "10": "Optimism", "56": "BNB Chain", "100": "Gnosis", "137": "Polygon", "324": "zkSync Era", "8453": "Base", "42161": "Arbitrum", "59144": "Linea" };
-    const protocol = bridge.protocol === "ACROSS" ? "Across" : bridge.protocol;
-    items.push({ tone: "proved", text: `${protocol || "Bridge"} deposit evidence was observed from a verified bridge contract.` });
-    if (out) items.push({ tone: "proved", text: `${displayAmount(out)} left the sender during this transaction.` });
-    if (bridge.destinationChainId) items.push({ tone: "detail", text: `Destination: ${chainNames[String(bridge.destinationChainId)] || `chain ${bridge.destinationChainId}`}.` });
-    if (bridge.depositId) items.push({ tone: "detail", text: `Deposit ID: ${bridge.depositId}.` });
-    items.push({ tone: "warning", text: "Destination delivery is not proven by this origin transaction alone." });
+    const bridge = classification.bridge; const chainNames = { "1": "Ethereum", "10": "Optimism", "56": "BNB Chain", "100": "Gnosis", "137": "Polygon", "324": "zkSync Era", "8453": "Base", "42161": "Arbitrum", "59144": "Linea" }; const protocol = bridge.protocol === "ACROSS" ? "Across" : bridge.protocol;
+    items.push({ tone: "proved", text: `${protocol || "Bridge"} deposit evidence was observed from a verified bridge contract.` }); if (out) items.push({ tone: "proved", text: `${displayAmount(out)} left the sender during this transaction.` });
+    if (bridge.destinationChainId) items.push({ tone: "detail", text: `Destination: ${chainNames[String(bridge.destinationChainId)] || `chain ${bridge.destinationChainId}`}.` }); if (bridge.depositId) items.push({ tone: "detail", text: `Deposit ID: ${bridge.depositId}.` }); items.push({ tone: "warning", text: "Destination delivery is not proven by this origin transaction alone." });
   } else if (type === "SWAP") {
-    items.push({ tone: "proved", text: "The transaction matched verified swap evidence." });
-    if (out) items.push({ tone: "proved", text: `${displayAmount(out)} left the sender.` });
-    if (incoming) items.push({ tone: "proved", text: `${displayAmount(incoming)} entered the sender wallet in the same transaction.` });
+    items.push({ tone: "proved", text: "The transaction matched verified swap evidence." }); if (out) items.push({ tone: "proved", text: `${displayAmount(out)} left the sender.` }); if (incoming) items.push({ tone: "proved", text: `${displayAmount(incoming)} entered the sender wallet in the same transaction.` });
   } else if (type === "TOKEN_APPROVAL") {
-    items.push({ tone: "proved", text: "The calldata matched the standard ERC-20 approval function." });
-    if (classification.approval?.spender) items.push({ tone: "detail", text: `Spender: ${short(classification.approval.spender)}.` });
+    items.push({ tone: "proved", text: "The calldata matched the standard ERC-20 approval function." }); if (classification.approval?.spender) items.push({ tone: "detail", text: `Spender: ${short(classification.approval.spender)}.` });
   } else if (type === "ERC20_TRANSFER" || type === "NATIVE_TRANSFER") {
-    if (out) items.push({ tone: "proved", text: `${displayAmount(out)} left the sender.` });
-    if (incoming) items.push({ tone: "proved", text: `${displayAmount(incoming)} entered the sender wallet.` });
+    if (out) items.push({ tone: "proved", text: `${displayAmount(out)} left the sender.` }); if (incoming) items.push({ tone: "proved", text: `${displayAmount(incoming)} entered the sender wallet.` });
   } else if (type === "NFT_MINT") {
-    for (const transfer of classification?.nft?.transfers || []) {
-      items.push({ tone: "proved", text: `${nftLabel(transfer)} was minted from the zero address into the sender wallet.` });
-    }
-    if (out) items.push({ tone: "detail", text: `${displayAmount(out)} also left the sender during this transaction; Trade Autopsy does not assume that was the mint price.` });
-    items.push({ tone: "proved", text: "A zero-address origin is deterministic ERC-721/ERC-1155 mint evidence." });
+    for (const transfer of classification?.nft?.transfers || []) items.push({ tone: "proved", text: `${nftLabel(transfer)} was minted from the zero address into the sender wallet.` });
+    if (out) items.push({ tone: "detail", text: `${displayAmount(out)} also left the sender during this transaction; Trade Autopsy does not assume that was the mint price.` }); items.push({ tone: "proved", text: "A zero-address origin is deterministic ERC-721/ERC-1155 mint evidence." });
   } else if (type === "NFT_BURN") {
+    const relationship = classification?.nft?.relationship;
     for (const transfer of classification?.nft?.transfers || []) {
-      items.push({ tone: "proved", text: `${nftLabel(transfer)} moved from the sender wallet to the zero address.` });
+      const owner = relationship?.senderIsAssetOwner === false ? short(transfer.from) : "the sender wallet";
+      items.push({ tone: "proved", text: `${nftLabel(transfer)} moved from ${owner} to the zero address.` });
     }
+    if (relationship?.senderIsAssetOwner === false) items.push({ tone: "detail", text: "The transaction sender acted as the ERC-1155 operator; the affected asset belonged to another address." });
     items.push({ tone: "proved", text: "A zero-address destination is deterministic ERC-721/ERC-1155 burn evidence." });
   } else if (type === "NFT_TRANSFER") {
-    for (const transfer of walletNftTransfers) items.push({ tone: "proved", text: nftMovementText(transfer, wallet) });
+    if (walletNftTransfers.length > 4) {
+      const outgoing = walletNftTransfers.filter((transfer) => transfer?.from?.toLowerCase() === wallet).length; const incomingCount = walletNftTransfers.length - outgoing;
+      items.push({ tone: "proved", text: `${walletNftTransfers.length} positive-quantity ERC-1155 item movements involved the sender wallet: ${outgoing} outgoing and ${incomingCount} incoming.` });
+      items.push({ tone: "detail", text: "Individual token IDs and quantities remain available in Technical evidence." });
+    } else for (const transfer of walletNftTransfers) items.push({ tone: "proved", text: nftMovementText(transfer, wallet) });
     items.push({ tone: "warning", text: "NFT transfer evidence proves movement, not whether it was a purchase, sale, or gift." });
   } else if (type === "CONTRACT_INTERACTION") {
-    items.push({ tone: "warning", text: "A contract was called, but the available evidence does not prove one specific higher-level action." });
-    for (const transfer of walletNftTransfers) items.push({ tone: "proved", text: nftMovementText(transfer, wallet) });
-    if (walletNftTransfers.length > 0) items.push({ tone: "warning", text: "These NFT/item movements are verified, but their economic meaning is not proven by transfer evidence alone." });
+    items.push({ tone: "warning", text: "A contract was called, but the available evidence does not prove one specific higher-level action." }); for (const transfer of walletNftTransfers) items.push({ tone: "proved", text: nftMovementText(transfer, wallet) }); if (walletNftTransfers.length > 0) items.push({ tone: "warning", text: "These NFT/item movements are verified, but their economic meaning is not proven by transfer evidence alone." });
   }
-
   return items;
 }
 
-function VerdictStamp({ verdict }) {
-  const v = VERDICT_STYLES[verdict] || VERDICT_STYLES.warning;
-  const Icon = v.Icon;
-  return (
-    <div className="stamp-in" style={{ border: `3px solid ${v.color}`, color: v.color, transform: "rotate(-6deg)" }}>
-      <Icon size={18} strokeWidth={2.5} />
-      <span>{v.label}</span>
-    </div>
-  );
-}
-
-function ActionBadge({ type }) {
-  const label = ACTION_LABELS[type] || (type ? type.replaceAll("_", " ") : "UNKNOWN ACTION");
-  return <div className="action-badge"><span className="action-dot" />ACTION · {label}</div>;
-}
-
-function ActionSequence({ sequence }) {
-  const steps = sequence?.steps || [];
-  if (steps.length < 2) return null;
-  const orderVerified = sequence.ordering === "VERIFIED_COMMAND_ORDER";
-  return (
-    <div className="sequence-box">
-      <div className="sequence-label">Action sequence</div>
-      <div className="sequence-steps">{steps.map((step,index)=><span key={`${step.type}-${index}`} className="sequence-part"><span className="sequence-step">{ACTION_LABELS[step.type] || step.type.replaceAll("_", " ")}</span>{index<steps.length-1&&<span className="sequence-arrow">→</span>}</span>)}</div>
-      <div className="sequence-note">{orderVerified ? "Order verified from the transaction command stream." : "Multiple actions detected; exact order is not proven."}</div>
-    </div>
-  );
-}
+function VerdictStamp({ verdict }) { const v = VERDICT_STYLES[verdict] || VERDICT_STYLES.warning; const Icon = v.Icon; return <div className="stamp-in" style={{ border: `3px solid ${v.color}`, color: v.color, transform: "rotate(-6deg)" }}><Icon size={18} strokeWidth={2.5} /><span>{v.label}</span></div>; }
+function ActionBadge({ type }) { const label = ACTION_LABELS[type] || (type ? type.replaceAll("_", " ") : "UNKNOWN ACTION"); return <div className="action-badge"><span className="action-dot" />ACTION · {label}</div>; }
+function ActionSequence({ sequence }) { const steps = sequence?.steps || []; if (steps.length < 2) return null; const orderVerified = sequence.ordering === "VERIFIED_COMMAND_ORDER"; return <div className="sequence-box"><div className="sequence-label">Action sequence</div><div className="sequence-steps">{steps.map((step,index)=><span key={`${step.type}-${index}`} className="sequence-part"><span className="sequence-step">{ACTION_LABELS[step.type] || step.type.replaceAll("_", " ")}</span>{index<steps.length-1&&<span className="sequence-arrow">→</span>}</span>)}</div><div className="sequence-note">{orderVerified ? "Order verified from the transaction command stream." : "Multiple actions detected; exact order is not proven."}</div></div>; }
 
 export default function TradeAutopsy() {
-  const [hash, setHash] = useState("");
-  const [status, setStatus] = useState("idle");
-  const [errorMsg, setErrorMsg] = useState("");
-  const [candidates, setCandidates] = useState([]);
-  const [caseData, setCaseData] = useState(null);
-  const [analysis, setAnalysis] = useState(null);
-  const [showRaw, setShowRaw] = useState(false);
-  const [caseNum, setCaseNum] = useState(null);
-
+  const [hash, setHash] = useState(""); const [status, setStatus] = useState("idle"); const [errorMsg, setErrorMsg] = useState(""); const [candidates, setCandidates] = useState([]); const [caseData, setCaseData] = useState(null); const [analysis, setAnalysis] = useState(null); const [showRaw, setShowRaw] = useState(false); const [caseNum, setCaseNum] = useState(null);
   useEffect(() => { setCaseNum(Math.floor(1000 + Math.random() * 8999)); }, []);
-
-  async function detectCase() {
-    const cleanHash = hash.trim();
-    setStatus("detecting"); setErrorMsg(""); setCandidates([]); setCaseData(null); setAnalysis(null);
-    try {
-      const res = await fetch("/api/detect", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ hash: cleanHash }) });
-      const json = await res.json();
-      if (!res.ok) { setStatus("error"); setErrorMsg(json.error || "Something went wrong detecting the chain."); return; }
-      setCandidates(json.candidates || []); setStatus("confirm");
-    } catch { setStatus("error"); setErrorMsg("Couldn't reach the server. Check your connection and try again."); }
-  }
-
-  async function confirmChain(candidate) {
-    setStatus("loading"); setErrorMsg("");
-    try {
-      const res = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ hash: hash.trim(), chainId: candidate.chainId }) });
-      const json = await res.json();
-      if (!res.ok) { setStatus("error"); setErrorMsg(json.error || "Something went wrong pulling this transaction."); return; }
-      setCaseData(json.caseData); setAnalysis(json.analysis); setStatus("done");
-    } catch { setStatus("error"); setErrorMsg("Couldn't reach the server. Check your connection and try again."); }
-  }
-
+  async function detectCase() { const cleanHash = hash.trim(); setStatus("detecting"); setErrorMsg(""); setCandidates([]); setCaseData(null); setAnalysis(null); try { const res = await fetch("/api/detect", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ hash: cleanHash }) }); const json = await res.json(); if (!res.ok) { setStatus("error"); setErrorMsg(json.error || "Something went wrong detecting the chain."); return; } setCandidates(json.candidates || []); setStatus("confirm"); } catch { setStatus("error"); setErrorMsg("Couldn't reach the server. Check your connection and try again."); } }
+  async function confirmChain(candidate) { setStatus("loading"); setErrorMsg(""); try { const res = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ hash: hash.trim(), chainId: candidate.chainId }) }); const json = await res.json(); if (!res.ok) { setStatus("error"); setErrorMsg(json.error || "Something went wrong pulling this transaction."); return; } setCaseData(json.caseData); setAnalysis(json.analysis); setStatus("done"); } catch { setStatus("error"); setErrorMsg("Couldn't reach the server. Check your connection and try again."); } }
   return (
     <div className="autopsy-root">
       <style dangerouslySetInnerHTML={{ __html: `
@@ -208,10 +101,9 @@ export default function TradeAutopsy() {
         {status==="loading"&&<div className="loading-row"><span className="dot"/><span className="dot"/><span className="dot"/>Pulling evidence from the chain…</div>}
         {status==="done"&&caseData&&analysis&&<div className="report">
           <div className="report-top"><div className="report-meta">CASE #{caseNum??"----"}<br/>{caseData.chain.name.toUpperCase()} · BLOCK {caseData.blockNumber}</div><VerdictStamp verdict={analysis.verdict}/></div>
-          <div className="action-row"><ActionBadge type={caseData.classification?.type}/></div>
-          <ActionSequence sequence={caseData.actionSequence}/>
+          <div className="action-row"><ActionBadge type={caseData.classification?.type}/></div><ActionSequence sequence={caseData.actionSequence}/>
           <div className="report-body"><div className="report-section"><div className="report-section-label">Summary</div><div className="report-section-text">{analysis.summary}</div></div><div className="report-section"><div className="report-section-label">Why</div><div className="report-section-text">{analysis.why}</div></div><div className="report-section"><div className="report-section-label">Tip for next time</div><div className="report-section-text">{analysis.tip}</div></div><a className="explorer-link" href={`${caseData.chain.explorer}${caseData.hash}`} target="_blank" rel="noreferrer">View on {caseData.chain.name} explorer →</a></div>
-          <hr className="divider"/><div className="facts-grid"><div className="fact"><div className="fact-label">Status</div><div className="fact-value">{caseData.success?"Success":"Reverted"}</div></div><div className="fact"><div className="fact-label">Network fee</div><div className="fact-value">{caseData.feeEth} {caseData.chain.symbol}</div></div><div className="fact"><div className="fact-label">From</div><div className="fact-value">{short(caseData.from)}</div></div><div className="fact"><div className="fact-label">To</div><div className="fact-value">{caseData.to?short(caseData.to):"Contract creation"}</div></div><div className="fact"><div className="fact-label">Gas used</div><div className="fact-value">{caseData.gasUsedPct!=null?`${caseData.gasUsedPct}% of limit`:caseData.gasUsed}</div></div><div className="fact"><div className="fact-label">Token transfers</div><div className="fact-value">{caseData.transferCount}</div></div>{caseData.nftTransferCount>0&&<div className="fact"><div className="fact-label">NFT / item movements</div><div className="fact-value">{caseData.nftTransferCount}</div></div>}</div>
+          <hr className="divider"/><div className="facts-grid"><div className="fact"><div className="fact-label">Status</div><div className="fact-value">{caseData.success?"Success":"Reverted"}</div></div><div className="fact"><div className="fact-label">Network fee</div><div className="fact-value">{caseData.feeEth} {caseData.chain.symbol}</div></div><div className="fact"><div className="fact-label">From</div><div className="fact-value">{short(caseData.from)}</div></div><div className="fact"><div className="fact-label">To</div><div className="fact-value">{caseData.to?short(caseData.to):"Contract creation"}</div></div><div className="fact"><div className="fact-label">Gas used</div><div className="fact-value">{caseData.gasUsedPct!=null?`${caseData.gasUsedPct}% of limit`:caseData.gasUsed}</div></div><div className="fact"><div className="fact-label">Token transfers</div><div className="fact-value">{caseData.transferCount}</div></div>{caseData.nftTransferCount>0&&<div className="fact"><div className="fact-label">Wallet NFT / item movements</div><div className="fact-value">{caseData.nftTransferCount}</div></div>}</div>
           <div className="evidence"><div className="evidence-title">Evidence trail</div>{buildEvidenceTrail(caseData).map((item,index)=><div className={`evidence-item evidence-${item.tone}`} key={`${item.text}-${index}`}><span className="evidence-mark">{item.tone==="proved"?"✓":item.tone==="warning"?"!":"→"}</span><span>{item.text}</span></div>)}</div>
           <button className="raw-toggle" onClick={()=>setShowRaw(s=>!s)}>Technical evidence{showRaw?<ChevronUp size={14}/>:<ChevronDown size={14}/>}</button>{showRaw&&<div className="raw-body">{JSON.stringify(caseData,null,2)}</div>}
         </div>}
