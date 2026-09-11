@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { CHAINS, rpcCall, hexToDecString, isValidTxHash, TRANSFER_TOPIC } from "../../../lib/chains";
+import { CHAINS, rpcTransactionBundle, hexToDecString, isValidTxHash, TRANSFER_TOPIC } from "../../../lib/chains";
 import { extractPayment, verifyPayment, paymentRequiredResponse, buildPaymentRequired } from "../../../lib/x402";
 import { checkFreeTierLimit, getClientIp } from "../../../lib/rateLimit";
 import { formatTokenAmount, resolveTokenMetadata } from "../../../lib/tokenMetadata";
@@ -42,7 +42,7 @@ export async function POST(req) {
   const chain = CHAINS.find((c) => c.id === chainId);
   if (!isValidTxHash(hash) || !chain) return NextResponse.json({ error: "Missing or invalid hash/chain." }, { status: 400 });
   let tx, receipt;
-  try { [tx, receipt] = await Promise.all([rpcCall(chain, "eth_getTransactionByHash", [hash]), rpcCall(chain, "eth_getTransactionReceipt", [hash])]); }
+  try { ({ tx, receipt } = await rpcTransactionBundle(chain, hash)); }
   catch (e) { return NextResponse.json({ error: e.message || `Failed to reach ${chain.name}.` }, { status: 502 }); }
   if (!tx || !receipt) return NextResponse.json({ error: `Transaction not found on ${chain.name}, or its receipt isn't available yet (it may still be pending).` }, { status: 404 });
 
