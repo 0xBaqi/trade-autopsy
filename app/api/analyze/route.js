@@ -7,6 +7,7 @@ import { classifyTransaction } from "../../../lib/transactionClassification";
 import { reconstructAssetFlows } from "../../../lib/assetFlows";
 import { detectSwapClassification } from "../../../lib/swapDetection";
 import { detectAcrossBridgeDeposit } from "../../../lib/bridgeDetection";
+import { detectNftLifecycleAction } from "../../../lib/nftActionDetection";
 import { buildActivityEvidence } from "../../../lib/activityEvidence";
 import { reconstructActionSequence } from "../../../lib/actionSequence";
 import { reconstructWalletActivity } from "../../../lib/walletReconstruction";
@@ -73,14 +74,12 @@ export async function POST(req) {
   const assetFlows = reconstructAssetFlows({ tx, receipt, chain, tokenTransfers, nativeTrace });
   const walletActivity = reconstructWalletActivity({ tx, assetFlows, nftTransfers });
 
-  // P2S: detectors run independently against the same verified evidence. The
-  // final classification remains a single overall label for compatibility,
-  // while activities can preserve every independently proven primary action.
   const canDetectHigherLevelActions = baseClassification.type === "CONTRACT_INTERACTION";
   const bridgeDetection = canDetectHigherLevelActions ? detectAcrossBridgeDeposit({ tx, receipt, assetFlows, chainId: chain.id }) : null;
   const swapDetection = canDetectHigherLevelActions ? detectSwapClassification({ tx, receipt, assetFlows, chainId: chain.id, tokenTransfers }) : null;
-  const classification = bridgeDetection || swapDetection || baseClassification;
-  const detections = { bridge: bridgeDetection, swap: swapDetection };
+  const nftLifecycleDetection = canDetectHigherLevelActions ? detectNftLifecycleAction({ tx, nftTransfers }) : null;
+  const classification = bridgeDetection || swapDetection || nftLifecycleDetection || baseClassification;
+  const detections = { bridge: bridgeDetection, swap: swapDetection, nftLifecycle: nftLifecycleDetection };
   const activities = buildActivityEvidence({ classification, detections, tokenTransfers, nftTransfers });
   const actionSequence = reconstructActionSequence({ classification, activities });
   const data = { hash, chain: { id: chain.id, name: chain.name, symbol: chain.symbol, explorer: chain.explorer }, success, from: tx.from, to: tx.to, value, feeEth, gasUsed: gasUsed.toString(), gasLimit: gasLimit.toString(), gasUsedPct, blockNumber: parseInt(receipt.blockNumber, 16), logCount: (receipt.logs || []).length, transferCount: tokenTransfers.length, tokenTransfers, nftTransferCount: nftTransfers.length, nftTransfers, classification, assetFlows, walletActivity, nativeTrace: { available: nativeTrace.available, source: nativeTrace.source, transferCount: nativeTrace.transfers.length, diagnostics: nativeTrace.diagnostics || null }, activities, actionSequence };
