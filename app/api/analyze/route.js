@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { CHAINS, rpcCall, hexToDecString, isValidTxHash, TRANSFER_TOPIC } from "../../../lib/chains";
+import { CHAINS, rpcTransactionBundle, hexToDecString, isValidTxHash, TRANSFER_TOPIC } from "../../../lib/chains";
 import { extractPayment, verifyPayment, paymentRequiredResponse, buildPaymentRequired } from "../../../lib/x402";
 import { checkFreeTierLimit, getClientIp } from "../../../lib/rateLimit";
 import { formatTokenAmount, resolveTokenMetadata } from "../../../lib/tokenMetadata";
@@ -7,9 +7,12 @@ import { classifyTransaction } from "../../../lib/transactionClassification";
 import { reconstructAssetFlows } from "../../../lib/assetFlows";
 import { detectSwapClassification } from "../../../lib/swapDetection";
 import { detectAcrossBridgeDeposit } from "../../../lib/bridgeDetection";
+import { detectNftLifecycleAction } from "../../../lib/nftActionDetection";
 import { buildActivityEvidence } from "../../../lib/activityEvidence";
 import { reconstructActionSequence } from "../../../lib/actionSequence";
+import { reconstructWalletActivity } from "../../../lib/walletReconstruction";
 import { traceNativeTransfers } from "../../../lib/nativeTrace";
+import { decodeNftTransfers } from "../../../lib/nftEvidence";
 import { generateGroundedAnalysis } from "../../../lib/openaiAnalysis";
 import { buildDeterministicAnalysis } from "../../../lib/deterministicAnalysis";
 
@@ -39,7 +42,7 @@ export async function POST(req) {
   const chain = CHAINS.find((c) => c.id === chainId);
   if (!isValidTxHash(hash) || !chain) return NextResponse.json({ error: "Missing or invalid hash/chain." }, { status: 400 });
   let tx, receipt;
-  try { [tx, receipt] = await Promise.all([rpcCall(chain, "eth_getTransactionByHash", [hash]), rpcCall(chain, "eth_getTransactionReceipt", [hash])]); }
+  try { ({ tx, receipt } = await rpcTransactionBundle(chain, hash)); }
   catch (e) { return NextResponse.json({ error: e.message || `Failed to reach ${chain.name}.` }, { status: 502 }); }
   if (!tx || !receipt) return NextResponse.json({ error: `Transaction not found on ${chain.name}, or its receipt isn't available yet (it may still be pending).` }, { status: 404 });
 
@@ -64,22 +67,22 @@ export async function POST(req) {
     const metadata = metadataByAddress.get(transfer.tokenAddress.toLowerCase()) || { symbol: null, decimals: null };
     return { ...transfer, symbol: metadata.symbol, decimals: metadata.decimals, amount: formatTokenAmount(transfer.rawAmount, metadata.decimals) };
   });
+  const nftTransfers = success ? decodeNftTransfers(receipt) : [];
 
   const nativeTrace = success ? await traceNativeTransfers(chain, hash, tx, receipt) : { available: false, source: null, transfers: [], diagnostics: null };
-  const baseClassification = classifyTransaction({ tx, receipt, tokenTransfers });
+  const baseClassification = classifyTransaction({ tx, receipt, tokenTransfers, nftTransfers });
   const assetFlows = reconstructAssetFlows({ tx, receipt, chain, tokenTransfers, nativeTrace });
+  const walletActivity = reconstructWalletActivity({ tx, assetFlows, nftTransfers });
 
-  // P2S: detectors run independently against the same verified evidence. The
-  // final classification remains a single overall label for compatibility,
-  // while activities can preserve every independently proven primary action.
   const canDetectHigherLevelActions = baseClassification.type === "CONTRACT_INTERACTION";
   const bridgeDetection = canDetectHigherLevelActions ? detectAcrossBridgeDeposit({ tx, receipt, assetFlows, chainId: chain.id }) : null;
   const swapDetection = canDetectHigherLevelActions ? detectSwapClassification({ tx, receipt, assetFlows, chainId: chain.id, tokenTransfers }) : null;
-  const classification = bridgeDetection || swapDetection || baseClassification;
-  const detections = { bridge: bridgeDetection, swap: swapDetection };
-  const activities = buildActivityEvidence({ classification, detections, tokenTransfers });
+  const nftLifecycleDetection = canDetectHigherLevelActions ? detectNftLifecycleAction({ tx, nftTransfers }) : null;
+  const classification = bridgeDetection || swapDetection || nftLifecycleDetection || baseClassification;
+  const detections = { bridge: bridgeDetection, swap: swapDetection, nftLifecycle: nftLifecycleDetection };
+  const activities = buildActivityEvidence({ classification, detections, tokenTransfers, nftTransfers });
   const actionSequence = reconstructActionSequence({ classification, activities });
-  const data = { hash, chain: { id: chain.id, name: chain.name, symbol: chain.symbol, explorer: chain.explorer }, success, from: tx.from, to: tx.to, value, feeEth, gasUsed: gasUsed.toString(), gasLimit: gasLimit.toString(), gasUsedPct, blockNumber: parseInt(receipt.blockNumber, 16), logCount: (receipt.logs || []).length, transferCount: tokenTransfers.length, tokenTransfers, classification, assetFlows, nativeTrace: { available: nativeTrace.available, source: nativeTrace.source, transferCount: nativeTrace.transfers.length, diagnostics: nativeTrace.diagnostics || null }, activities, actionSequence };
+  const data = { hash, chain: { id: chain.id, name: chain.name, symbol: chain.symbol, explorer: chain.explorer }, success, from: tx.from, to: tx.to, value, feeEth, gasUsed: gasUsed.toString(), gasLimit: gasLimit.toString(), gasUsedPct, blockNumber: parseInt(receipt.blockNumber, 16), logCount: (receipt.logs || []).length, transferCount: tokenTransfers.length, tokenTransfers, nftTransferCount: walletActivity.walletNftMovementCount, rawNftTransferCount: nftTransfers.length, nftTransfers, classification, assetFlows, walletActivity, nativeTrace: { available: nativeTrace.available, source: nativeTrace.source, transferCount: nativeTrace.transfers.length, diagnostics: nativeTrace.diagnostics || null }, activities, actionSequence };
   let analysis = buildDeterministicAnalysis(data);
   try { const groundedAnalysis = await generateGroundedAnalysis(data); if (groundedAnalysis) analysis = groundedAnalysis; }
   catch (e) { console.error("[analysis] OpenAI explanation failed:", e?.message || e); }
