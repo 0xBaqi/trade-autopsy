@@ -13,7 +13,7 @@ const VERDICT_STYLES = {
 const ACTION_LABELS = {
   SWAP: "SWAP", BRIDGE: "BRIDGE", TOKEN_APPROVAL: "APPROVAL", APPROVAL: "APPROVAL",
   PERMIT2_PERMISSION: "PERMIT2 PERMISSION", ERC20_TRANSFER: "TOKEN TRANSFER", NFT_TRANSFER: "NFT TRANSFER",
-  NFT_MINT: "NFT MINT", NFT_BURN: "NFT BURN", NATIVE_TRANSFER: "NATIVE TRANSFER",
+  NFT_PURCHASE: "NFT PURCHASE", NFT_SALE: "NFT SALE", NFT_MINT: "NFT MINT", NFT_BURN: "NFT BURN", NATIVE_TRANSFER: "NATIVE TRANSFER",
   CONTRACT_CREATION: "CONTRACT CREATION", CONTRACT_INTERACTION: "CONTRACT INTERACTION",
   FAILED: "FAILED ATTEMPT", UNKNOWN: "UNKNOWN ACTION",
 };
@@ -43,7 +43,15 @@ function buildEvidenceTrail(caseData) {
   const walletNftTransfers = wallet ? nftTransfers.filter((transfer) => isPositiveNftMovement(transfer) && (transfer?.from?.toLowerCase() === wallet || transfer?.to?.toLowerCase() === wallet)) : [];
   items.push({ tone: "proved", text: `Transaction confirmed on ${caseData.chain.name} at block ${caseData.blockNumber}.` });
   items.push({ tone: caseData.success ? "proved" : "warning", text: caseData.success ? "The chain marked this transaction as successful." : "The chain marked this transaction as reverted." });
-  if (type === "BRIDGE" && classification.bridge) {
+  if ((type === "NFT_PURCHASE" || type === "NFT_SALE") && classification.marketplace) {
+    const marketplace = classification.marketplace;
+    const action = type === "NFT_PURCHASE" ? "purchase" : "sale";
+    items.push({ tone: "proved", text: `${marketplace.protocol === "SEAPORT" ? "Seaport" : marketplace.protocol || "Marketplace"} ${marketplace.version || ""} OrderFulfilled evidence was emitted by the verified marketplace contract.`.replace("  ", " ") });
+    if (marketplace.nft) items.push({ tone: "proved", text: `${nftLabel(marketplace.nft)} ${type === "NFT_PURCHASE" ? "entered" : "left"} the sender wallet.` });
+    if (marketplace.payment) items.push({ tone: "proved", text: `${displayAmount(marketplace.payment)} ${type === "NFT_PURCHASE" ? "left the sender as consideration" : "entered the sender as sale consideration"}.` });
+    items.push({ tone: "detail", text: `These independent marketplace, NFT, and payment facts support the ${action} classification.` });
+    if (type === "NFT_SALE" && marketplace.paymentPerspective === "RECEIVED_BY_SENDER_GROSS") items.push({ tone: "warning", text: "The displayed incoming payment is gross receipt; fees or other outgoing transfers in the same transaction may reduce net proceeds." });
+  } else if (type === "BRIDGE" && classification.bridge) {
     const bridge = classification.bridge; const chainNames = { "1": "Ethereum", "10": "Optimism", "56": "BNB Chain", "100": "Gnosis", "137": "Polygon", "324": "zkSync Era", "8453": "Base", "42161": "Arbitrum", "59144": "Linea" }; const protocol = bridge.protocol === "ACROSS" ? "Across" : bridge.protocol;
     items.push({ tone: "proved", text: `${protocol || "Bridge"} deposit evidence was observed from a verified bridge contract.` }); if (out) items.push({ tone: "proved", text: `${displayAmount(out)} left the sender during this transaction.` });
     if (bridge.destinationChainId) items.push({ tone: "detail", text: `Destination: ${chainNames[String(bridge.destinationChainId)] || `chain ${bridge.destinationChainId}`}.` }); if (bridge.depositId) items.push({ tone: "detail", text: `Deposit ID: ${bridge.depositId}.` }); items.push({ tone: "warning", text: "Destination delivery is not proven by this origin transaction alone." });
