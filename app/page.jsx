@@ -46,10 +46,12 @@ function buildEvidenceTrail(caseData) {
   if ((type === "NFT_PURCHASE" || type === "NFT_SALE") && classification.marketplace) {
     const marketplace = classification.marketplace;
     const action = type === "NFT_PURCHASE" ? "purchase" : "sale";
-    items.push({ tone: "proved", text: `${marketplace.protocol === "SEAPORT" ? "Seaport" : marketplace.protocol || "Marketplace"} ${marketplace.version || ""} OrderFulfilled evidence was emitted by the verified marketplace contract.`.replace("  ", " ") });
-    if (marketplace.nft) items.push({ tone: "proved", text: `${nftLabel(marketplace.nft)} ${type === "NFT_PURCHASE" ? "entered" : "left"} the sender wallet.` });
+    const marketplaceNfts = Array.isArray(marketplace.nfts) && marketplace.nfts.length ? marketplace.nfts : marketplace.nft ? [marketplace.nft] : [];
+    const fulfillmentCount = marketplace.fulfillmentCount || 1;
+    items.push({ tone: "proved", text: `${fulfillmentCount} verified ${marketplace.protocol === "SEAPORT" ? "Seaport" : marketplace.protocol || "marketplace"} ${marketplace.version || ""} OrderFulfilled event${fulfillmentCount === 1 ? "" : "s"} ${fulfillmentCount === 1 ? "was" : "were"} emitted by the verified marketplace contract.`.replace("  ", " ") });
+    for (const nft of marketplaceNfts) items.push({ tone: "proved", text: `${nftLabel(nft)} ${type === "NFT_PURCHASE" ? "entered" : "left"} the sender wallet.` });
     if (marketplace.payment) items.push({ tone: "proved", text: `${displayAmount(marketplace.payment)} ${type === "NFT_PURCHASE" ? "left the sender as consideration" : "entered the sender as sale consideration"}.` });
-    items.push({ tone: "detail", text: `These independent marketplace, NFT, and payment facts support the ${action} classification.` });
+    items.push({ tone: "detail", text: marketplace.fulfillmentCount > 1 ? `The verified fulfillments map one-to-one to these NFT movements, and their decoded consideration matches the aggregate wallet payment. These facts support the multi-order ${action} classification.` : `These independent marketplace, NFT, and payment facts support the ${action} classification.` });
     if (type === "NFT_SALE" && marketplace.paymentPerspective === "RECEIVED_BY_SENDER_GROSS") items.push({ tone: "warning", text: "The displayed incoming payment is gross receipt; fees or other outgoing transfers in the same transaction may reduce net proceeds." });
   } else if (type === "BRIDGE" && classification.bridge) {
     const bridge = classification.bridge; const chainNames = { "1": "Ethereum", "10": "Optimism", "56": "BNB Chain", "100": "Gnosis", "137": "Polygon", "324": "zkSync Era", "8453": "Base", "42161": "Arbitrum", "59144": "Linea" }; const protocol = bridge.protocol === "ACROSS" ? "Across" : bridge.protocol;
