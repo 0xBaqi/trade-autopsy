@@ -1,40 +1,52 @@
 # Trade Autopsy
 
-A plain-language on-chain transaction explainer. Paste a tx hash from any supported
-chain, get a case-file style report on what happened, why, and what it cost.
+**Understand what happened in an on-chain transaction—and why.**
 
-## Deploy in ~10 minutes (Vercel)
+Trade Autopsy is a plain-language blockchain transaction explainer. Paste a transaction hash from a supported chain to get a case-file-style breakdown of the transaction's outcome, activity, and costs.
 
-1. Push this folder to a new GitHub repo.
-2. Go to https://vercel.com/new and import that repo.
-3. Vercel auto-detects Next.js — no config needed.
-4. Before deploying, add an environment variable:
-   - Key: `ANTHROPIC_API_KEY`
-   - Value: your key from https://console.anthropic.com/settings/keys
-5. Deploy. You'll get a public URL like `trade-autopsy.vercel.app`.
+**[Open the deployed app](https://trade-autopsy-addr.vercel.app/)** · [Source code](https://github.com/0xBaqi/trade-autopsy)
 
-## Run locally first (optional, recommended before deploying)
+> **Availability note:** The deployment URL is recorded in the builder's GitHub profile; current uptime has not been independently verified. The application requires a configured Anthropic API key for AI analysis.
+
+## What it does
+
+- Accepts a transaction hash on a supported EVM network.
+- Retrieves transaction information through public RPC endpoints.
+- Uses Claude to help explain the observed activity in accessible language.
+- Presents the analysis as a readable transaction case file.
+
+## Supported chains
+
+X Layer, Ethereum, Base, Arbitrum, Optimism, Polygon, and BNB Chain.
+
+Public RPC endpoints do not require user-supplied RPC API keys. AI analysis requires a server-side Anthropic API key.
+
+## Run locally
+
+Requires Node.js and an Anthropic API key.
 
 ```bash
 npm install
 cp .env.local.example .env.local
-# paste your real key into .env.local
+# Set ANTHROPIC_API_KEY in .env.local
 npm run dev
 ```
 
-Then open http://localhost:3000
+Open http://localhost:3000.
 
-## Supported chains
+The API key is used server-side in `app/api/analyze/route.js`. Never commit `.env.local` or expose the key in client-side code.
 
-X Layer, Ethereum, Base, Arbitrum, Optimism, Polygon, BNB Chain — all via public
-RPC endpoints, no API keys needed for those. Only the Claude analysis step needs
-your Anthropic key, and it stays server-side in `app/api/analyze/route.js` — never
-exposed to the browser.
+## Deploy on Vercel
 
-## For the OKX.AI submission
+1. Import this repository into Vercel.
+2. Configure `ANTHROPIC_API_KEY` in the project's environment variables.
+3. Deploy and verify the public URL.
+4. Test a successful and a failed/reverted transaction where supported.
 
-- This needs to be live at a public URL before you submit (OKX reviews and lists it).
-- Record your 90-second demo using a real transaction hash — ideally one on X Layer,
-  since that's the hackathon's home chain, even though the tool works on others too.
-- Test with both a successful and a failed/reverted transaction if you can find one,
-  since the verdict logic is the most interesting thing to show off.
+## Project background
+
+Originally built for an OKX.AI hackathon submission. The project is intended to make blockchain transaction outcomes easier to inspect without requiring users to manually interpret raw RPC responses.
+
+## Limitations
+
+AI explanations should be checked against the underlying transaction evidence. RPC availability and provider limits may affect analysis, and a deployed frontend does not guarantee that the AI backend is currently configured or available.
