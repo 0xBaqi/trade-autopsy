@@ -38,7 +38,7 @@ export default function LookupForm({ size = "large", placeholder = "0x… or htt
       <form className="lookup-row" onSubmit={submit} noValidate>
         <label htmlFor={`lookup-${size}`} className="sr-only">Transaction hash or explorer link</label>
         <input id={`lookup-${size}`} className="lookup-input" type="text" value={value} onChange={(e) => setValue(e.target.value)} placeholder={placeholder} autoComplete="off" spellCheck={false} aria-describedby={error ? `lookup-err-${size}` : undefined} />
-        <button className="btn btn-primary" type="submit" disabled={busy}>{busy ? "FINDING CHAIN…" : "OPEN CASE"}</button>
+        <button className="btn btn-primary" type="submit" disabled={busy}>{busy ? "Finding chain…" : "Open case"}</button>
       </form>
       {error && <p id={`lookup-err-${size}`} className="lookup-error" role="alert">{error}</p>}
       {candidates.length > 1 && (

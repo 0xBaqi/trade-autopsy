@@ -21,7 +21,7 @@ export default function Home() {
   return (
     <main>
       <section className="hero">
-        <div className="eyebrow">EVM TRANSACTION CASE FILES · {CHAINS.length} CHAINS</div>
+        <div className="eyebrow">EVM transaction case files · {CHAINS.length} chains</div>
         <h1 className="hero-title">What actually happened on-chain?</h1>
         <p className="hero-sub">Paste a transaction hash or an explorer link. Get a plain-language case file: what moved, what it was, and where the evidence stops.</p>
         <LookupForm size="large" />
@@ -33,7 +33,7 @@ export default function Home() {
       </section>
 
       <section id="how" className="band">
-        <h2 className="eyebrow">HOW A CASE IS BUILT</h2>
+        <h2 className="eyebrow">How a case is built</h2>
         <div className="grid-4">
           {STEPS.map(([n, title, text]) => (
             <div key={n} className="card">
@@ -46,7 +46,7 @@ export default function Home() {
       </section>
 
       <section id="examples" className="band">
-        <h2 className="eyebrow">SEE A CASE FILE</h2>
+        <h2 className="eyebrow">See a case file</h2>
         <div className="card card-slot">
           <p>Real example cases are coming. They will be verified transactions, never invented ones. Until then, paste any hash above.</p>
         </div>

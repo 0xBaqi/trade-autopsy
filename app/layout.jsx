@@ -1,7 +1,7 @@
 import "./globals.css";
 import SiteHeader from "../components/SiteHeader";
 
-const FONTS = "https://fonts.googleapis.com/css2?family=Special+Elite&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:wght@400;500;600;700&display=swap";
+const FONTS = "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap";
 
 const DESCRIPTION = "Paste a transaction hash or explorer link. Get a plain-language case file on what actually happened on-chain, across 20 EVM chains.";
 
