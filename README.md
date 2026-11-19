@@ -1,52 +1,70 @@
 # Trade Autopsy
 
-**Understand what happened in an on-chain transaction—and why.**
+**Understand what happened in an on-chain transaction, and why.**
 
-Trade Autopsy is a plain-language blockchain transaction explainer. Paste a transaction hash from a supported chain to get a case-file-style breakdown of the transaction's outcome, activity, and costs.
+Paste an EVM transaction hash. Trade Autopsy finds the chain, reads the transaction and receipt from public RPCs, reconstructs what happened with deterministic rules, and explains it in plain language as a case file.
 
-**[Open the deployed app](https://trade-autopsy-addr.vercel.app/)** · [Source code](https://github.com/0xBaqi/trade-autopsy)
+**[Open the app](https://trade-autopsy-addr.vercel.app/)** · [Source](https://github.com/0xBaqi/trade-autopsy)
 
-> **Availability note:** The deployment URL is recorded in the builder's GitHub profile; current uptime has not been independently verified. The application requires a configured Anthropic API key for AI analysis.
+> Status: working MVP, being rebuilt into a fuller product. See [SPEC.md](SPEC.md) for the plan and the "done" bar. Current uptime is not independently monitored.
 
-## What it does
+## How it works
 
-- Accepts a transaction hash on a supported EVM network.
-- Retrieves transaction information through public RPC endpoints.
-- Uses Claude to help explain the observed activity in accessible language.
-- Presents the analysis as a readable transaction case file.
+Evidence, then reconstruction, then classification, then explanation.
 
-## Supported chains
+1. **Evidence** comes only from chain data: transaction, receipt, logs, token metadata, and native-transfer traces where a provider exposes them.
+2. **Reconstruction and classification are deterministic code** (`lib/`): native/ERC-20/NFT transfers, token approvals, swaps, Across bridge deposits, Seaport marketplace trades, Permit2, asset flows per wallet, and an ordered action sequence. When the evidence does not support a label, the answer is `UNKNOWN` or `CONTRACT_INTERACTION`, never a guess.
+3. **AI only explains.** An OpenAI model receives the structured evidence and writes a short summary. If AI is unavailable, over budget, or fails, a deterministic explanation is shown instead.
 
-X Layer, Ethereum, Base, Arbitrum, Optimism, Polygon, and BNB Chain.
+## Supported chains (20)
 
-Public RPC endpoints do not require user-supplied RPC API keys. AI analysis requires a server-side Anthropic API key.
+Ethereum, X Layer, BNB Chain, Polygon, Arbitrum, Base, Optimism, zkSync Era, Linea, Scroll, Blast, Mantle, Mode, Manta Pacific, Zora, Unichain, Avalanche, Gnosis Chain, opBNB, Celo. Defined in `lib/chains.js`.
 
 ## Run locally
 
-Requires Node.js and an Anthropic API key.
+Requires Node.js 20+.
 
 ```bash
 npm install
-cp .env.local.example .env.local
-# Set ANTHROPIC_API_KEY in .env.local
-npm run dev
+cp .env.local.example .env.local   # see the variables below
+npm run dev                        # http://localhost:3000
+npm test                           # offline unit and API tests
+npm run build
 ```
 
-Open http://localhost:3000.
+### Environment variables
 
-The API key is used server-side in `app/api/analyze/route.js`. Never commit `.env.local` or expose the key in client-side code.
+| Variable | Required | Purpose |
+|---|---|---|
+| `OPENAI_API_KEY` | No | Enables the AI explanation. Without it, the deterministic explanation is used. |
+| `AI_DAILY_CAP` | No | Max AI explanations per UTC day (default 300). Past it, the deterministic explanation is served. |
+| `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | Recommended in production | Shared store for the result cache, per-IP rate limits and the AI budget. Without them an in-memory fallback is used, which is per serverless instance and therefore best-effort only. |
+| `ETHERSCAN_API_KEY` | No | Improves internal native-transfer evidence where public RPCs do not expose traces. |
+| `ETHEREUM_RPC_URL`, `ETHEREUM_RPC_URL_2` | No | Extra Ethereum RPC endpoints. |
 
-## Deploy on Vercel
+Secrets are read server-side only. Never commit `.env.local`.
 
-1. Import this repository into Vercel.
-2. Configure `ANTHROPIC_API_KEY` in the project's environment variables.
-3. Deploy and verify the public URL.
-4. Test a successful and a failed/reverted transaction where supported.
+## Cost protection
 
-## Project background
+- Finished case files are cached by chain and hash for 6 hours (10 minutes if the AI explanation fell back), so repeats cost nothing.
+- Uncached analyses are limited to 15 per IP per 10 minutes; chain detection to 30 per IP per 10 minutes.
+- AI explanations stop at the daily cap.
 
-Originally built for an OKX.AI hackathon submission. The project is intended to make blockchain transaction outcomes easier to inspect without requiring users to manually interpret raw RPC responses.
+There is no payment layer and no API key system.
+
+## API
+
+- `POST /api/detect` with `{ "hash": "0x..." }` returns the chains where the hash exists.
+- `POST /api/analyze` with `{ "hash": "0x...", "chainId": "ethereum" }` returns `{ caseData, analysis }`.
+- `GET /api/health` returns service status.
 
 ## Limitations
 
-AI explanations should be checked against the underlying transaction evidence. RPC availability and provider limits may affect analysis, and a deployed frontend does not guarantee that the AI backend is currently configured or available.
+- Explanations are interpretation. Check them against the evidence shown in the case file.
+- Public RPCs can be slow or rate limited, and some chains do not expose traces, so internal native transfers may be unavailable.
+- Wallet activity is sender-centric. Only supported protocol actions are recognised; everything else is reported as a contract interaction.
+- No tests yet against recorded real transactions on every chain; the current suite covers the classification rules, the cost-protection layer and the API routes with synthetic and mocked data.
+
+## Project background
+
+Started as an OKX.AI hackathon submission. An earlier version offered pay-per-analysis through x402; that was removed.

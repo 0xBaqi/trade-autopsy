@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 import { CHAINS, rpcCall, isValidTxHash } from "../../../lib/chains";
+import { rateLimit, kvGet, kvSet, detectCacheKey, CACHE_TTL_FULL } from "../../../lib/guard";
+
+const DETECT_LIMIT = 30;          // uncached detections per IP (each fans out to every supported chain)
+const DETECT_WINDOW_SEC = 10 * 60;
 
 export async function POST(req) {
   let body;
@@ -16,6 +20,13 @@ export async function POST(req) {
       { status: 400 }
     );
   }
+
+  const cacheKey = detectCacheKey(hash);
+  const cached = await kvGet(cacheKey);
+  if (Array.isArray(cached?.candidates) && cached.candidates.length > 0) return NextResponse.json(cached, { headers: { "X-Cache": "HIT" } });
+
+  const { allowed, retryAfter } = await rateLimit(req, "detect", DETECT_LIMIT, DETECT_WINDOW_SEC);
+  if (!allowed) return NextResponse.json({ error: "Too many lookups. Please wait before trying again.", retryAfter }, { status: 429, headers: { "Retry-After": String(retryAfter) } });
 
   const attempts = CHAINS.map(async (chain) => {
     try {
@@ -43,5 +54,7 @@ export async function POST(req) {
     );
   }
 
+  // Only cache when every chain answered, so a transient RPC failure is never remembered as "not on that chain".
+  if (failures.length === 0) await kvSet(cacheKey, { candidates }, CACHE_TTL_FULL);
   return NextResponse.json({ candidates });
 }

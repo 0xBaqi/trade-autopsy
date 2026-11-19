@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { CHAINS, rpcTransactionBundle, hexToDecString, isValidTxHash, TRANSFER_TOPIC } from "../../../lib/chains";
-import { extractPayment, verifyPayment, paymentRequiredResponse, buildPaymentRequired } from "../../../lib/x402";
-import { checkFreeTierLimit, getClientIp } from "../../../lib/rateLimit";
+import { rateLimit, aiBudgetAllows, kvGet, kvSet, caseCacheKey, CACHE_TTL_FULL, CACHE_TTL_SHORT } from "../../../lib/guard";
 import { formatTokenAmount, resolveTokenMetadata } from "../../../lib/tokenMetadata";
 import { classifyTransaction } from "../../../lib/transactionClassification";
 import { reconstructAssetFlows } from "../../../lib/assetFlows";
@@ -18,30 +17,30 @@ import { generateGroundedAnalysis } from "../../../lib/openaiAnalysis";
 import { buildDeterministicAnalysis } from "../../../lib/deterministicAnalysis";
 
 export async function OPTIONS() {
-  return new Response(null, { status: 200, headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "POST, OPTIONS", "Access-Control-Allow-Headers": "Content-Type, X-PAYMENT, x-payment" } });
+  return new Response(null, { status: 200, headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "POST, OPTIONS", "Access-Control-Allow-Headers": "Content-Type" } });
 }
 export async function GET() {
-  return new Response(JSON.stringify({ status: "ok", service: "Trade Autopsy", description: "Plain-English post-mortem for any EVM transaction hash", payment: { protocol: "x402", version: 2, network: "eip155:196", price: "$0.01" } }), { status: 200, headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "X-ACCEPTS-PAYMENT": "x402" } });
+  return new Response(JSON.stringify({ status: "ok", service: "Trade Autopsy", description: "Plain-English post-mortem for any EVM transaction hash" }), { status: 200, headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } });
 }
+const CORS = { "Access-Control-Allow-Origin": "*" };
+const ANALYZE_LIMIT = 15;          // uncached analyses per IP
+const ANALYZE_WINDOW_SEC = 10 * 60;
+
 export async function POST(req) {
-  const resourceUrl = `${process.env.NEXT_PUBLIC_BASE_URL || "https://trade-autopsy-addr.vercel.app"}/api/analyze`;
-  const description = "Trade Autopsy: plain-English post-mortem for any EVM transaction hash";
-  const paymentHeader = extractPayment(req);
-  if (paymentHeader) {
-    const requirements = buildPaymentRequired(resourceUrl, description);
-    const verification = await verifyPayment(paymentHeader, requirements);
-    if (!verification.valid && !verification.skipped) return NextResponse.json({ error: "Payment verification failed", details: verification.error }, { status: 402 });
-  } else {
-    const ip = getClientIp(req);
-    const { allowed, retryAfter } = checkFreeTierLimit(ip);
-    if (!allowed) return new Response(JSON.stringify({ error: "Too many free analyses. Please wait before trying again.", retryAfter }), { status: 429, headers: { "Content-Type": "application/json", "Retry-After": String(retryAfter), "Access-Control-Allow-Origin": "*" } });
-  }
   let body;
-  try { body = await req.json(); } catch { return NextResponse.json({ error: "Invalid request body." }, { status: 400 }); }
-  const hash = (body?.hash || "").trim();
+  try { body = await req.json(); } catch { return NextResponse.json({ error: "Invalid request body." }, { status: 400, headers: CORS }); }
+  const hash = (typeof body?.hash === "string" ? body.hash : "").trim();
   const chainId = body?.chainId;
   const chain = CHAINS.find((c) => c.id === chainId);
-  if (!isValidTxHash(hash) || !chain) return NextResponse.json({ error: "Missing or invalid hash/chain." }, { status: 400 });
+  if (!isValidTxHash(hash) || !chain) return NextResponse.json({ error: "Missing or invalid hash/chain." }, { status: 400, headers: CORS });
+
+  // Finished case files are immutable once mined, so repeats are served from cache and cost nothing.
+  const cacheKey = caseCacheKey(chain.id, hash);
+  const cached = await kvGet(cacheKey);
+  if (cached?.caseData && cached?.analysis) return NextResponse.json(cached, { headers: { ...CORS, "X-Cache": "HIT" } });
+
+  const { allowed, retryAfter } = await rateLimit(req, "analyze", ANALYZE_LIMIT, ANALYZE_WINDOW_SEC);
+  if (!allowed) return NextResponse.json({ error: "Too many analyses. Please wait before trying again.", retryAfter }, { status: 429, headers: { ...CORS, "Retry-After": String(retryAfter) } });
   let tx, receipt;
   try { ({ tx, receipt } = await rpcTransactionBundle(chain, hash)); }
   catch (e) { return NextResponse.json({ error: e.message || `Failed to reach ${chain.name}.` }, { status: 502 }); }
@@ -86,7 +85,13 @@ export async function POST(req) {
   const actionSequence = reconstructActionSequence({ classification, activities });
   const data = { hash, chain: { id: chain.id, name: chain.name, symbol: chain.symbol, explorer: chain.explorer }, success, from: tx.from, to: tx.to, value, feeEth, gasUsed: gasUsed.toString(), gasLimit: gasLimit.toString(), gasUsedPct, blockNumber: parseInt(receipt.blockNumber, 16), logCount: (receipt.logs || []).length, transferCount: tokenTransfers.length, tokenTransfers, nftTransferCount: walletActivity.walletNftMovementCount, rawNftTransferCount: nftTransfers.length, nftTransfers, classification, assetFlows, walletActivity, nativeTrace: { available: nativeTrace.available, source: nativeTrace.source, transferCount: nativeTrace.transfers.length, diagnostics: nativeTrace.diagnostics || null }, activities, actionSequence };
   let analysis = buildDeterministicAnalysis(data);
-  try { const groundedAnalysis = await generateGroundedAnalysis(data); if (groundedAnalysis) analysis = groundedAnalysis; }
-  catch (e) { console.error("[analysis] OpenAI explanation failed:", e?.message || e); }
-  return NextResponse.json({ caseData: data, analysis }, { headers: { "Access-Control-Allow-Origin": "*", "X-PAYMENT-RESPONSE": "verified" } });
+  let aiUsed = false;
+  if (process.env.OPENAI_API_KEY && await aiBudgetAllows()) {
+    try { const groundedAnalysis = await generateGroundedAnalysis(data); if (groundedAnalysis) { analysis = groundedAnalysis; aiUsed = true; } }
+    catch (e) { console.error("[analysis] OpenAI explanation failed:", e?.message || e); }
+  }
+  const result = { caseData: data, analysis };
+  // Cache for long only when the explanation is final. A deterministic fallback is kept briefly so a later request can get the AI version.
+  await kvSet(cacheKey, result, aiUsed || !process.env.OPENAI_API_KEY ? CACHE_TTL_FULL : CACHE_TTL_SHORT);
+  return NextResponse.json(result, { headers: { ...CORS, "X-Cache": "MISS" } });
 }
