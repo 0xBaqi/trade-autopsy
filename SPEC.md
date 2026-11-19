@@ -1,6 +1,6 @@
 # Trade Autopsy v2 — Spec (Trade Autopsy + Aftermath, one product)
 
-Status: v2. D1, D2 and payments decision approved by Baqi 2026-11-19. M0 in progress (see section 3). Nobody edits this file without Baqi's sign-off.
+Status: v2. D1, D2 and payments decision approved by Baqi 2026-11-19. M0 done and merged. Milestone order swapped 2026-11-19 (UI first, engine port second); UI direction approved by Baqi from the mockup. Nobody edits this file without Baqi's sign-off.
 Owner/architect/reviewer: Claude. Implementers: ChatGPT, Antigravity (and Claude on request).
 
 ## 1. One-line product
@@ -25,7 +25,7 @@ Both are fully server-side RPC readers. Neither needs a wallet connection.
 
 ## 3. Fix first (Milestone 0, before any feature)
 
-M0 status on branch `m0-hygiene`: items 1, 2 and 3 done; item 4 partly done (Vitest, classification, cost-protection and API tests; recorded real-transaction golden fixtures still needed); item 5 done for Next (16.x, 0 audit findings), TypeScript migration deferred to M1; item 6 belongs to M1 (engine port).
+M0 status on branch `m0-hygiene`: items 1, 2 and 3 done; item 4 partly done (Vitest, classification, cost-protection and API tests; recorded real-transaction golden fixtures still needed); item 5 done for Next (16.x, 0 audit findings), TypeScript migration deferred (incremental, from M1); item 6 belongs to M2 (engine port).
 
 1. **Remove payments from v1 (decided).** Delete `lib/x402.js`, the `X-PAYMENT` handling, the 402 path and the hardcoded `X-PAYMENT-RESPONSE: verified` header from `app/api/analyze/route.js`. This also closes the current hole: with OKX keys missing, `verifyPayment` returns `valid: true, skipped: true`, so ANY request with an `X-PAYMENT` header skips the rate limit. Remove the x402 fields from the GET status response and env docs. Add a test that an `X-PAYMENT` header changes nothing.
 2. **Cost protection (D2, recommended).** With no paid tier, the limit exists to stop strangers burning the RPC and OpenAI budget. `lib/rateLimit.js` is per-serverless-instance memory (the file says so itself), so it barely works on Vercel. Recommended: (a) cache finished case files by chain+hash (chain data is immutable once mined, so repeats cost nothing), (b) a small shared-store limit (Upstash free tier) on uncached analyses, (c) a hard daily cap on AI calls that falls back to the deterministic explanation.
@@ -78,9 +78,9 @@ Wallet-level analysis, multi-transaction comparison, P&L, history/accounts, revo
 
 ## 8. Milestones (one at a time; each ends with Baqi reviewing a deployed preview)
 - **M0** Hygiene: section 3.
-- **M1** Engine merge: permissions module inside the analyze response; tests green; no UI change yet.
-- **M2** Case page and permalink; new layout and Home.
-- **M3** Examples, Method, polish, accessibility, done-bar check, launch.
+- **M1** New UI shell on the existing engine: Home (one input accepting hash or explorer link), case page at `/tx/[chain]/[hash]` (shareable permalink, server-rendered from the cache or a fresh analysis), phone-first responsive layout, "Proved / Not proved / Unknown" evidence list, "What to do next", collapsed technical evidence, and a reserved "Permissions left behind" slot. No engine changes beyond what the permalink needs. Mockup is the visual reference.
+- **M2** Engine merge: port Aftermath's permission engine into `src/permissions/` and fill the reserved slot (ACTIVE / INACTIVE / UNKNOWN per permission); port its tests and update the 2 stale ones (section 3, item 6); tests green; archive the `aftermath` repo afterwards.
+- **M3** Examples (about 6 real, verified hashes; never invented), Method page, polish, accessibility, done-bar check, launch.
 
 ## 9. How the three AI builders work together
 - Root `AGENTS.md` points every tool at this file. One spec, one source of truth.
